@@ -1,0 +1,338 @@
+#include <Arduino.h>
+#include <TFT_eSPI.h>
+#include <SPI.h>
+#include <FS.h>
+#include <SPIFFS.h>
+#include "TAMC_GT911.h"
+#include <ESP32-3248S035.h>
+#include "../../renegade_members.h"
+#include <esp_now.h>
+#include <WiFi.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+#include "NotoSansBold15.h"
+#include "NotoSansBold36.h"
+#include "NotoSansMonoSCB20.h"
+
+#define NAME_NODE "Jeep_PRO_V1"
+#define VERSION   "V 0.01"
+
+#define MOD_PERIPHERALS 5
+
+TAMC_GT911 tp = TAMC_GT911(TOUCH_SDA, TOUCH_SCL, TOUCH_INT, TOUCH_RST, TOUCH_WIDTH, TOUCH_HEIGHT);
+
+struct struct_Peripheral {
+    char        Name[20];
+    int         Type;      //1=Switch, 2=Amp, 3=Volt
+    // Sensor
+    int         IOPort;
+    float       NullWert;
+    float       VperAmp;
+    int         Vin;
+    float       Value;
+};
+struct struct_Peer {
+    char       Name[20] = {};
+    u_int8_t   BroadcastAddress[6];
+    uint32_t   TimestampLastSeen = 0;
+    int        Type = 0;  // 
+};
+
+struct_Peripheral S[5];
+struct_Peer       P[4];
+
+char *PeripheralName[MOD_PERIPHERALS] = {"LED", "SW-1", "SW-2", "SW-3", "", "", "", "", "", ""};
+Touch_struct T;
+
+StaticJsonDocument<300> doc;
+String jsondata;
+
+u_int8_t TempBroadcast[6];
+
+int PeerCount = 0;
+
+bool Debug       = true;
+bool SleepMode   = true;
+bool ReadyToPair = false;
+
+uint32_t TimestampLastSend    = 0;
+uint32_t TimestampLastContact = 0;
+uint32_t TimestampSend = 0;
+uint32_t TimestampPair = 0;
+uint32_t TimestampTouch = 0;;
+
+Preferences preferences;
+
+void   PrepareStatus();
+void   SendMessage();
+int    SendPairingReuest();
+
+void   OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len);
+void   OnDataSent(uint8_t *mac_addr, uint8_t sendStatus);
+
+void   SavePeers();
+void   GetPeers();
+void   ClearPeers();
+void   RegisterPeers();
+
+void   Eichen();
+
+void   PrintMAC(const uint8_t * mac_addr);
+
+void SavePeers() {
+  preferences.begin("Jeepify", false);
+  char Buf[10] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
+
+  PeerCount = 0;
+
+  for (int Pi=0; Pi< MAX_PEERS; Pi++) {
+    if (P[Pi].Type > 0) {
+      PeerCount++;
+      //P.Type
+      sprintf(BufNr, "%d", Pi); strcpy(Buf, "Type-"); strcat(Buf, BufNr);
+      Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(P[Pi].Type);
+      if (preferences.getInt(Buf, 0) != P[Pi].Type) preferences.putInt(Buf, P[Pi].Type);
+      
+      //P.Name
+      strcpy(Buf, "Name-"); strcat(Buf, BufNr);
+      BufS = P[Pi].Name;
+      Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(BufS);
+      if (preferences.getString(Buf, "") != BufS) preferences.putString(Buf, BufS);
+      
+      //P.BroadcastAdress
+      for (int b=0; b<6; b++) {
+        sprintf(BufB, "%d", b); 
+        strcpy(Buf, "B"); strcat(Buf, BufB); strcat (Buf, "-"); strcat (Buf, BufNr);
+        if (preferences.getUChar(Buf, 0) != P[Pi].BroadcastAddress[b]) preferences.putUChar(Buf, P[Pi].BroadcastAddress[b]);
+      }
+    }
+  }
+  if (preferences.getInt("PeerCount") != PeerCount) preferences.putInt("PeerCount", PeerCount);
+
+  preferences.end();
+}
+void GetPeers() {
+  preferences.begin("Jeepify", true);
+  
+  char Buf[10] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
+  
+  PeerCount = 0;
+  for (int Pi=0; Pi<MAX_PEERS; Pi++) {
+    // Peer gefüllt?
+    sprintf(BufNr, "%d", Pi); strcpy(Buf, "Type-"); strcat(Buf, BufNr);
+    if (preferences.getInt(Buf) > 0) {
+      PeerCount++;
+      // P.Type
+      P[Pi].Type = preferences.getInt(Buf);
+      // P.BroadcastAdress
+      for (int b=0; b<6; b++) {
+        sprintf(BufB, "%d", b); 
+        strcpy(Buf, "B"); strcat(Buf, BufB); strcat (Buf, "-"); strcat (Buf, BufNr);
+        P[Pi].BroadcastAddress[b] = preferences.getUChar(Buf);
+      }
+      P[Pi].TimestampLastSeen = millis();
+      strcpy(Buf, "Name-"); strcat(Buf, BufNr);
+      // P.Name
+      BufS = preferences.getString(Buf);
+      strcpy(P[Pi].Name, BufS.c_str());
+    }
+  }
+  preferences.end();
+}
+void ReportPeers() {
+  for (int Pi=0; Pi<MAX_PEERS; Pi++) {
+    Serial.println(P[Pi].Name);
+    Serial.println(P[Pi].Type);
+    Serial.print("MAC: "); PrintMAC(P[Pi].BroadcastAddress);
+    Serial.println();
+  }
+}
+void RegisterPeers() {
+  esp_now_peer_info_t peerInfo;
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  memset(&peerInfo, 0, sizeof(peerInfo));
+
+  // Register BROADCAST
+  for (int b=0; b<6; b++) peerInfo.peer_addr[b] = (uint8_t) broadcastAddressAll[b];
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+      Serial.println("Failed to add peer");
+    }
+    else {
+      Serial.print("Peer: "); Serial.print(P[Pi].Name); 
+      Serial.print (" ("); PrintMAC(broadcastAddressAll); Serial.println(") added...");
+    }
+
+  // Register Peers
+  for (int Pi=0; Pi<MAX_PEERS; Pi++) {
+    if (P[Pi].Type > 0) {
+      for (int b=0; b<6; b++) peerInfo.peer_addr[iib] = (uint8_t) P[Pi].BroadcastAddress[b];
+        if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+          Serial.println("Failed to add peer");
+        }
+        else {
+          Serial.print("Peer: "); Serial.print(P[Pi].Name); 
+          Serial.print (" ("); PrintMAC(P[Pi].BroadcastAddress); Serial.println(") added...");
+        }
+    }
+  }
+}
+void ClearPeers() {
+  preferences.begin("Jeepify", false);
+    preferences.clear();
+    Serial.println("Jeepify cleared...");
+  preferences.end();
+}
+
+int  InitiatePairing() {
+  jsondata = "";  //clearing String after data is being sent
+  doc.clear();
+  
+  doc["Node"]    = NAME_NODE;   
+  doc["Pairing"] = "add me";
+  doc["Type"]    = "4";
+  doc["SW0"]     = Switch[0].Name;
+  doc["SW1"]     = Switch[1].Name;
+  doc["SW2"]     = Switch[2].Name;
+  doc["SW3"]     = Switch[3].Name;
+
+  serializeJson(doc, jsondata);  
+
+  esp_now_send(broadcastAddressAll, (uint8_t *) jsondata.c_str(), 100);  //Sending "jsondata"  
+  
+  Serial.println(jsondata);   
+  jsondata = "";  //clearing String after data is being sent  
+
+  return 1;                                         
+}
+void InitModule() {
+  
+  preferences.begin("Jeepify", true);
+    Debug     = preferences.getBool("Debug", true);
+    SleepMode = preferences.getBool("SleepMode", false);
+  
+  int Si=0;
+  strcpy(S[Si].Name, "LED");
+  S[Si].Type        = 1;
+  S[Si].IOPort      = 12;
+  S[Si].NullWert    = preferences.getInt("N0", 3150);
+  S[Si].VperAmp     = preferences.getFloat("VperAmp", 0.166);
+  S[Si].Vin         = preferences.getInt("Vin", 200);
+  S[Si].Value       = preferences.getFloat("Value", 0);
+  
+  Si++;
+  strcpy(S[Si].Name, "SW-1");
+  S[Si].Type        = 1;
+  S[Si].IOPort      = 12;
+  S[Si].NullWert    = preferences.getInt("Nullwert", 3150);
+  S[Si].VperAmp     = preferences.getFloat("VperAmp", 0.166);
+  S[Si].Vin         = preferences.getInt("Vin", 200);
+  S[Si].Value       = preferences.getFloat("Value", 0);
+  
+}
+void setup() {
+  Serial.begin(74880);
+  InitModule();
+  tp.begin();
+  tp.setRotation(ROTATION_LEFT);
+
+
+}
+
+int TouchRead() {
+  int ret = 0;
+  
+  tp.read();
+  
+  if (tp.isTouched) {
+    if (T.TimestampTouched == 0) {        // Touch berührt bei x0/y0
+      T.x0 = tp.points[0].x; 
+      T.y0 = tp.points[0].y; 
+      T.TimestampTouched = millis();
+    }
+  }
+  else {
+    if (T.TimestampTouched == 0) {         // nicht berührt, nicht losgelassen
+      ret = 0;
+    }
+    else {                                 // gerade losgelassen bei x1/y1
+      T.x1 = tp.points[0].x; 
+      T.y1 = tp.points[0].y;
+      T.TimestampReleased = millis();
+
+      // Geste
+           if ((T.x1-T.x0) > 50)  ret = SWIPE_LEFT;                                                // swipe left
+      else if ((T.x1-T.x0) < -50) ret = SWIPE_RIGHT;                                               // swipe right
+      else if ((T.y1-T.y0) > 50)  ret = SWIPE_DOWN;                                                // swipe down
+      else if ((T.y1-T.y0) < -50) ret = SWIPE_UP;                                                  // swipe up
+      else if ((T.TimestampReleased - T.TimestampTouched) > LONG_PRESS_INTERVAL) ret = LONG_PRESS; // longPress
+      else ret = CLICK;
+
+      T.TimestampTouched  = 0;
+      T.TimestampReleased = 0;
+    }
+  }
+  return ret;
+}
+void loop() {
+  int Touch;
+  if ((millis() - TimestampTouch) > TOUCH_INTERVAL) {
+    Touch = TouchRead();
+    TimestampTouch = millis();
+    if (Touch == CLICK) {
+      Serial.print("(singleTouch) Touch "); Serial.print(": ");;
+      Serial.print("  x: ");Serial.print(T.x1);
+      Serial.print("  y: ");Serial.print(T.y1);
+      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
+      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      
+      Serial.println(' ');
+    }
+    if (Touch == LONG_PRESS) {
+      Serial.print("(LongTouch) Touch "); Serial.print(": ");;
+      Serial.print("  x: ");Serial.print(T.x1);
+      Serial.print("  y: ");Serial.print(T.y1);
+      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
+      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.println(' ');
+    } 
+    if (Touch == SWIPE_RIGHT) {
+      Serial.print("(SwipeRight) Touch "); Serial.print(": ");;
+      Serial.print("  x: ");Serial.print(T.x1);
+      Serial.print("  y: ");Serial.print(T.y1);
+      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
+      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.println(' ');
+    } 
+    if (Touch == SWIPE_LEFT) {
+      Serial.print("(SwipeLeft) Touch "); Serial.print(": ");;
+      Serial.print("  x: ");Serial.print(T.x1);
+      Serial.print("  y: ");Serial.print(T.y1);
+      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
+      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.println(' ');
+    } 
+    if (Touch == SWIPE_DOWN) {
+      Serial.print("(SwipeDown) Touch "); Serial.print(": ");;
+      Serial.print("  x: ");Serial.print(T.x1);
+      Serial.print("  y: ");Serial.print(T.y1);
+      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
+      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.println(' ');
+    }
+    if (Touch == SWIPE_UP) {
+      Serial.print("(SwipeUp) Touch "); Serial.print(": ");;
+      Serial.print("  x: ");Serial.print(T.x1);
+      Serial.print("  y: ");Serial.print(T.y1);
+      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
+      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.println(' ');
+    } 
+  }
+}
+void PrintMAC(const uint8_t * mac_addr){
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+           mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+  Serial.print(macStr);
+}
