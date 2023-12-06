@@ -1,12 +1,11 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
-#include <SPI.h>
+//#include <SPI.h>
 //#include <FS.h>
-#include <SPIFFS.h>
+//#include <SPIFFS.h>
 #include "TAMC_GT911.h"
 #include <Adafruit_ADS1X15.h>
-#include <ESP32-3248S035.h>
-#include "../../renegade_members.h"
+#include "../../jeepify.h"
 #include <esp_now.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -16,9 +15,17 @@
 #include "NotoSansMonoSCB20.h"
 
 #define NODE_NAME "Jeep_PRO_V1"
-#define NODE_TYPE SWITCH_4_WAY
+#define NODE_TYPE BATTERY_SENSOR
 
-#define VERSION   "V 0.01"
+#define NAME_SENSOR_0 "Bat0"
+#define NAME_SENSOR_1 "Bat1"
+#define NAME_SENSOR_2 "Bat2"
+#define NAME_SENSOR_3 "Bat3"
+#define NAME_SENSOR_4 "Bat4"
+
+#define PIN_VOLTAGE
+
+#define VERSION   "V 0.70"
 
 #define MOD_PERIPHERALS 5
 #define PIN_VOLTAGE    35
@@ -29,27 +36,10 @@
 TAMC_GT911 tp = TAMC_GT911(TOUCH_SDA, TOUCH_SCL, TOUCH_INT, TOUCH_RST, TOUCH_WIDTH, TOUCH_HEIGHT);
 Adafruit_ADS1115 ads;
 
-struct struct_Peripheral {
-    char        Name[20];
-    int         Type;      //1=Switch, 2=Amp, 3=Volt
-    // Sensor
-    int         IOPort;
-    float       NullWert;
-    float       VperAmp;
-    int         Vin;
-    float       Value;
-};
-struct struct_Peer {
-    char       Name[20] = {};
-    u_int8_t   BroadcastAddress[6];
-    uint32_t   TSLastSeen = 0;
-    int        Type = 0;  // 
-};
+struct_Sensor S[NODE_TYPE];
+struct_Peer   P[MAX_PEERS];
 
-struct_Peripheral S[MAX_PERIPHERALS];
-struct_Peer       P[MAX_PEERS];
-
-Touch_struct T;
+struct_Touch Touch;
 
 StaticJsonDocument<300> doc;
 String jsondata;
@@ -64,7 +54,7 @@ bool ReadyToPair   = false;
 
 bool ScreenChanged = true;
 int  UpdateCount   = 0;
-int  Mode          = M_PAIRING;
+int  Mode          = S_PAIRING;
 int  OldMode       = 0;
 
 uint32_t TSLastSend    = 0;
@@ -76,9 +66,9 @@ uint32_t TSTouch = 0;
 
 Preferences preferences;
 
-TFT_eSPI TFT              = TFT_eSPI();
-TFT_eSprite TFTBuffer     = TFT_eSprite(&TFT);
-TFT_eSprite TFTGauge1     = TFT_eSprite(&TFT);
+TFT_eSPI TFT               = TFT_eSPI();
+TFT_eSprite TFTBuffer      = TFT_eSprite(&TFT);
+TFT_eSprite TFTGaugeSwitch = TFT_eSprite(&TFT);
 
 float  ReadAmp (int A);
 float  ReadVolt(int V);
@@ -98,14 +88,13 @@ void   ClearInit();
 void   PushTFT();
 void   ShowPairingScreen();
 
-
 void   SetSleepMode(bool Mode);
 void   SetDebugMode(bool Mode);
 
 void   Eichen();
 void   PrintMAC(const uint8_t * mac_addr);
-
-int  TouchRead();
+ 
+int    TouchRead();
 
 void InitModule() {
   /*preferences.begin("JeepifyPeers", false);
@@ -346,7 +335,7 @@ void ShowPairingScreen() {
   char Buf[100] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
   char macStr[18];
 
-  if (OldMode != M_PAIRING) TSScreenRefresh = millis();
+  if (OldMode != S_PAIRING) TSScreenRefresh = millis();
   if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
     OldMode = Mode;
     ScreenChanged = true;
@@ -385,15 +374,15 @@ void SendMessage () {
   doc["Node"] = NODE_NAME;   
 
   for (int SNr=0; SNr<MAX_PERIPHERALS ; SNr++) {
-    if (S[SNr].Type == SENSOR_SWITCH) {
+    if (S[SNr].Type == SENS_TYPE_SWITCH) {
       doc[S[SNr].Name] = S[SNr].Value;
     }
-    if (S[SNr].Type == SENSOR_AMP) {
+    if (S[SNr].Type == SENS_TYPE_AMP) {
       S[SNr].Value = ReadAmp(SNr);
       dtostrf(S[SNr].Value, 0, 2, buf);
       doc[S[SNr].Name] = buf;
     }
-    if (S[SNr].Type == SENSOR_VOLT) {
+    if (S[SNr].Type == SENS_TYPE_VOLT) {
       S[SNr].Value = ReadVolt(SNr);
       dtostrf(S[SNr].Value, 0, 2, buf);
       doc[S[SNr].Name], buf;
@@ -424,9 +413,11 @@ void SendPairingRequest() {
   doc["Type"]    = NODE_TYPE;
   doc["Pairing"] = "add me";
   
-  for (int Si=0 ; Si<NODE_TYPE; Si++) {
-    sprintf(BufNr, "%d", Si); strcpy(Buf, "SW"); strcat(Buf, BufNr);
-    doc[Buf] = S[Si].Name;
+  for (int Si=0 ; Si<MAX_PERIPHERALS; Si++) {
+    if (S[Si].Type > 0) {
+      sprintf(BufNr, "%d", Si); strcpy(Buf, "S"); strcat(Buf, BufNr);
+      doc[Buf] = S[Si].Name;
+    }
   }
   serializeJson(doc, jsondata);  
 
@@ -454,7 +445,7 @@ void Eichen() {
   preferences.begin("JeepifyInit", false);
 
   for(int SNr=0; SNr<MAX_PERIPHERALS; SNr++) {
-    if (S[SNr].Type == SENSOR_AMP) {
+    if (S[SNr].Type == SENS_TYPE_AMP) {
       float TempVal  = ads.readADC_SingleEnded(S[SNr].IOPort);
       float TempVolt = ads.computeVolts(TempVal);
       if (Debug) { 
@@ -483,9 +474,9 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   if (!error) {
     if (ReadyToPair) {
       if (doc["Pairing"] == "you are paired") { 
-        for (int b=0; b < 6; b++ ) TempBroadcast[b] = (uint8_t) mac[b];
+        //for (int b=0; b < 6; b++ ) TempBroadcast[b] = (uint8_t) mac[b];
         
-        bool exists = esp_now_is_peer_exist(TempBroadcast);
+        bool exists = esp_now_is_peer_exist(mac);
         if (exists) { 
           PrintMAC(TempBroadcast); Serial.println(" already exists...");
         }
@@ -498,12 +489,12 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
               P[PNr].Type = (int) doc["Type"];
               strcpy(P[PNr].Name, doc["Node"]);
               
-              for (int b = 0; b < 6; b++ ) P[PNr].BroadcastAddress[b] = TempBroadcast[b];
+              for (int b = 0; b < 6; b++ ) P[PNr].BroadcastAddress[b] = mac[b];
               P[PNr].TSLastSeen = millis();
               
               PairingSuccess = true; 
               SavePeers();
-              ShowAllPreferences();
+              //ShowAllPreferences();
               RegisterPeers();
               
               if (Debug) {
@@ -515,7 +506,7 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
               }
             }
           }
-          if (!PairingSuccess) { PrintMAC(TempBroadcast); Serial.println(" adding failed..."); } 
+          if (!PairingSuccess) { PrintMAC(mac); Serial.println(" adding failed..."); } 
         }
       }
     }
@@ -538,7 +529,7 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
         if (doc["Order"] == "Eichen")        Eichen();
         if (doc["Order"] == "VoltCalib") {
           for (int SNr=0; SNr<MAX_PERIPHERALS; SNr++){
-            if (S[SNr].Type = SENSOR_VOLT) {
+            if (S[SNr].Type = SENS_TYPE_VOLT) {
               int TempRead = analogRead(S[SNr].IOPort);
               Serial.print("Volt(vorher) = "); Serial.println(TempRead/S[SNr].Vin, 4);
               S[SNr].Vin = TempRead / (float)doc["Value"];
@@ -672,57 +663,57 @@ void setup() {
   //free Pins
 }
 void loop() {
-  int Touch;
+  int G;
   if ((millis() - TSTouch) > TOUCH_INTERVAL) {
-    Touch = TouchRead();
+    G = TouchRead();
     TSTouch = millis();
-    if (Touch == CLICK) {
+    if (G == CLICK) {
       Serial.print("(singleTouch) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(T.x1);
-      Serial.print("  y: ");Serial.print(T.y1);
-      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
-      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.print("  x: ");Serial.print(Touch.x1);
+      Serial.print("  y: ");Serial.print(Touch.y1);
+      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
+      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
       
       Serial.println(' ');
     }
-    if (Touch == LONG_PRESS) {
+    if (G == LONG_PRESS) {
       Serial.print("(LongTouch) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(T.x1);
-      Serial.print("  y: ");Serial.print(T.y1);
-      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
-      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.print("  x: ");Serial.print(Touch.x1);
+      Serial.print("  y: ");Serial.print(Touch.y1);
+      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
+      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
       Serial.println(' ');
     } 
-    if (Touch == SWIPE_RIGHT) {
+    if (G == SWIPE_RIGHT) {
       Serial.print("(SwipeRight) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(T.x1);
-      Serial.print("  y: ");Serial.print(T.y1);
-      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
-      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.print("  x: ");Serial.print(Touch.x1);
+      Serial.print("  y: ");Serial.print(Touch.y1);
+      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
+      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
       Serial.println(' ');
     } 
-    if (Touch == SWIPE_LEFT) {
+    if (G == SWIPE_LEFT) {
       Serial.print("(SwipeLeft) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(T.x1);
-      Serial.print("  y: ");Serial.print(T.y1);
-      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
-      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.print("  x: ");Serial.print(Touch.x1);
+      Serial.print("  y: ");Serial.print(Touch.y1);
+      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
+      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
       Serial.println(' ');
     } 
-    if (Touch == SWIPE_DOWN) {
+    if (G == SWIPE_DOWN) {
       Serial.print("(SwipeDown) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(T.x1);
-      Serial.print("  y: ");Serial.print(T.y1);
-      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
-      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.print("  x: ");Serial.print(Touch.x1);
+      Serial.print("  y: ");Serial.print(Touch.y1);
+      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
+      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
       Serial.println(' ');
     }
-    if (Touch == SWIPE_UP) {
+    if (G == SWIPE_UP) {
       Serial.print("(SwipeUp) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(T.x1);
-      Serial.print("  y: ");Serial.print(T.y1);
-      Serial.print("  Pressed: ");Serial.print(T.TimestampTouched);
-      Serial.print("  Released: ");Serial.print(T.TimestampReleased);
+      Serial.print("  x: ");Serial.print(Touch.x1);
+      Serial.print("  y: ");Serial.print(Touch.y1);
+      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
+      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
       Serial.println(' ');
     } 
   }
@@ -735,7 +726,7 @@ void loop() {
     TSPair = 0;
     ReadyToPair = false;
   }
-  if (Mode = M_PAIRING) {
+  if (Mode = S_PAIRING) {
     ShowPairingScreen();
   }
   //PushTFT();
@@ -772,37 +763,56 @@ float ReadVolt(int V) {
   return TempVolt;
 }
 int   TouchRead() {
+  uint16_t TouchX, TouchY;
+  uint8_t  Gesture;
+  bool TouchContact;
+
   int ret = 0;
-  
+
   tp.read();
   
-  if (tp.isTouched) {
-    if (T.TimestampTouched == 0) {        // Touch berührt bei x0/y0
-      T.x0 = tp.points[0].x; 
-      T.y0 = tp.points[0].y; 
-      T.TimestampTouched = millis();
-    }
+  TouchContact = tp.isTouched;
+  TouchX = tp.points[0].x;
+  TouchY = tp.points[0].y;
+  
+  //frisch berührt
+  if (TouchContact and !Touch.TSTouched) {       
+    Touch.TSTouched = millis();
+    Touch.x0 = TouchX;
+    Touch.y0 = TouchY;
+    Touch.Gesture = 0;
+    Touch.TSReleased = 0;
+    ret = TOUCHED;
   }
-  else {
-    if (T.TimestampTouched == 0) {         // nicht berührt, nicht losgelassen
-      ret = 0;
-    }
-    else {                                 // gerade losgelassen bei x1/y1
-      T.x1 = tp.points[0].x; 
-      T.y1 = tp.points[0].y;
-      T.TimestampReleased = millis();
-
-      // Geste
-           if ((T.x1-T.x0) > 50)  ret = SWIPE_LEFT;                                                // swipe left
-      else if ((T.x1-T.x0) < -50) ret = SWIPE_RIGHT;                                               // swipe right
-      else if ((T.y1-T.y0) > 50)  ret = SWIPE_DOWN;                                                // swipe down
-      else if ((T.y1-T.y0) < -50) ret = SWIPE_UP;                                                  // swipe up
-      else if ((T.TimestampReleased - T.TimestampTouched) > LONG_PRESS_INTERVAL) ret = LONG_PRESS; // longPress
-      else ret = CLICK;
-
-      T.TimestampTouched  = 0;
-      T.TimestampReleased = 0;
-    }
+  //Finger bleibt drauf
+  else if (TouchContact and Touch.TSTouched) {   
+    Touch.x0 = TouchX;
+    Touch.y0 = TouchY;
+    Touch.Gesture = 0;
+    Touch.TSReleased = 0;
+    ret = HOLD;
+  }
+  //Release
+  else if (!TouchContact and Touch.TSTouched) {  
+    Touch.TSReleased = millis();
+    Touch.x1 = TouchX;
+    Touch.y1 = TouchY;
+          
+         if ((Touch.x1-Touch.x0) > 50)  { Touch.Gesture = SWIPE_LEFT;  ret = SWIPE_LEFT; }                      // swipe left
+    else if ((Touch.x1-Touch.x0) < -50) { Touch.Gesture = SWIPE_RIGHT; ret = SWIPE_RIGHT; }                     // swipe right
+    else if ((Touch.y1-Touch.y0) > 50)  { Touch.Gesture = SWIPE_DOWN;  ret = SWIPE_DOWN; }                      // swipe down
+    else if ((Touch.y1-Touch.y0) < -50) { Touch.Gesture = SWIPE_UP;    ret = SWIPE_UP; }                        // swipe up
+    else if ((Touch.TSReleased - Touch.TSTouched) > LONG_PRESS_INTERVAL) {                                      // longPress
+      Touch.Gesture = LONG_PRESS;
+      ret = LONG_PRESS;     
+    }  
+    else { Touch.Gesture = CLICK; ret = CLICK; }
+  }                                                                    
+  //nicht berührt
+  else if (!TouchContact and !Touch.TSTouched) {  
+    ret = 0;
+    Touch.TSTouched  = 0;
+    Touch.TSReleased = 0;
   }
   return ret;
 }
