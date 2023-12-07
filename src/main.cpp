@@ -80,6 +80,8 @@ void   ClearInit();
 
 void   PushTFT();
 void   ShowPairingScreen();
+void   ShowEichen();
+void   ShowVoltCalib(float V);
 
 void   SetSleepMode(bool Mode);
 void   SetDebugMode(bool Mode);
@@ -409,7 +411,6 @@ void SendPairingRequest() {
   
   if (Debug) { Serial.print("\nSending: "); Serial.println(jsondata); }                                       
 }
-
 void SetSleepMode(bool Mode) {
   preferences.begin("JeepifyInit", false);
     SleepMode = Mode;
@@ -468,7 +469,7 @@ void ShowEichen() {
   }
 }
 void ShowVoltCalib(float V) {
-char Buf[100] = {}; char BufNr[10] = {}; 
+  char Buf[100] = {}; char BufNr[10] = {}; 
   
   if (OldMode != S_VOLTCALIB) TSScreenRefresh = millis(); 
   if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
@@ -492,7 +493,7 @@ char Buf[100] = {}; char BufNr[10] = {};
           Serial.print("Volt(nachher) = ");
           Serial.println(TempRead/S[SNr].Vin, 4);
         }
-        S[SNr].Vin = TempRead / (float)doc["Value"];
+        S[SNr].Vin = TempRead / V;
         
         preferences.begin("JeepifyInit", false);
         preferences.putFloat("Vin", S[SNr].Vin);
@@ -505,30 +506,6 @@ char Buf[100] = {}; char BufNr[10] = {};
         exit();
       }
     }
-  }
-    
-  nt h=20;
-    for(int SNr=0; SNr<MAX_PERIPHERALS; SNr++) {
-      if (S[SNr].Type == SENS_TYPE_AMP) {
-        float TempVal  = ads.readADC_SingleEnded(S[SNr].IOPort);
-        float TempVolt = ads.computeVolts(TempVal);
-        if (Debug) { 
-          Serial.print("TempVal:");     Serial.println(TempVal);
-          Serial.print(", TempVolt: "); Serial.println(TempVolt);
-        }
-        S[SNr].NullWert = TempVolt;
-        sprintf(Buf, "Null-%d", SNr); 
-        preferences.putFloat(Buf, S[SNr].NullWert);
-        if (Debug) {
-          Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(S[SNr].NullWert); 
-        }
-
-        dtostrf(TempVolt, 0, 2, BufNr);
-        sprintf(Buf, "[%d] %s (Type: %d): Gemessene Spannung bei Null: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
-        TFT.drawString(Buf, 10, 30+PNr+1*h);
-      }
-    }
-    preferences.end();
     
     delay(5000);
     
@@ -536,6 +513,8 @@ char Buf[100] = {}; char BufNr[10] = {};
     
     TSScreenRefresh = millis();
   }
+}
+
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   char* buff = (char*) incomingData;        //char buffer
   jsondata = String(buff);                  //converting into STRING
@@ -600,44 +579,18 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
       // BatterySensor
       if (NODE_TYPE == BATTERY_SENSOR) {
         if (doc["Order"] == "Eichen")      { Mode = S_EICHEN;    ShowEichen(); }
-        if (doc["Order"] == "VoltCalib")   { Mode = S_VOLTCALIB; ShowVoltCalib(); }
+        if (doc["Order"] == "VoltCalib")   { Mode = S_VOLTCALIB; ShowVoltCalib((float)doc["Value"]); }
       }
       // PDC
       if ((NODE_TYPE == SWITCH_1_WAY) or (NODE_TYPE == SWITCH_2_WAY) or
           (NODE_TYPE == SWITCH_4_WAY) or (NODE_TYPE == SWITCH_8_WAY)) {
-        if (doc["Order"]   == "ToggleSwitch0") { 
-          S[0].Value = !S[0].Value; 
+        if (doc["Order"]   == "ToggleSwitch") {
+          for (int SNr=0; SNr<MAX_PERIPHERALS; SNr++) {
+            if (S[SNr].Name == doc["Value"]) S[SNr].Value = !S[SNr].Value; 
+          }
           SendMessage();
-        }
-        if (doc["Order"]   == "ToggleSwitch1") { 
-          S[1].Value = !S[1].Value; 
-          SendMessage();
-        }
-        if (doc["Order"]   == "ToggleSwitch2") { 
-          S[2].Value = !S[2].Value; 
-          SendMessage();
-        }
-        if (doc["Order"]   == "ToggleSwitch3") { 
-          S[3].Value = !S[3].Value; 
-          SendMessage();
-        }
-        if (doc["Order"]   == "ToggleSwitch4") { 
-          S[4].Value = !S[4].Value; 
-          SendMessage();
-        }
-        if (doc["Order"]   == "ToggleSwitch5") { 
-          S[5].Value = !S[5].Value; 
-          SendMessage();
-        }
-        if (doc["Order"]   == "ToggleSwitch6") { 
-          S[6].Value = !S[6].Value; 
-          SendMessage();
-        }
-        if (doc["Order"]   == "ToggleSwitch7") { 
-          S[7].Value = !S[7].Value; 
-          SendMessage();
-        }       
-     }
+        }      
+      }
     }
   } // end (!error)
   else {  // error
