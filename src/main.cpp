@@ -94,26 +94,6 @@ bool   isSensorEmpty(int SNr);
 
 
 void InitModule() {
-  /*preferences.begin("JeepifyPeers", false);
-    preferences.putBool("Initialized", true);
-  preferences.end();
-
-  preferences.begin("JeepifyInit", false);
-    preferences.putBool("Debug", true);
-    preferences.putBool("SleepMode", false);
-
-    preferences.putInt("Null-0", 3134);
-    preferences.putFloat("Sens-0", 0.066);
-    preferences.putInt("Null-1", 3134);
-    preferences.putFloat("Sens-1", 0.066);
-    preferences.putInt("Null-2", 3134);
-    preferences.putFloat("Sens-2", 0.066);
-    preferences.putInt("Null-3", 3134);
-    preferences.putFloat("Sens-3", 0.066);
-
-    preferences.putInt("Vin", 200);
-  preferences.end();
-  */
   preferences.begin("JeepifyInit", true);
   Debug     = preferences.getBool("Debug", true);
   SleepMode = preferences.getBool("SleepMode", false);
@@ -350,10 +330,11 @@ void ShowPairingScreen() {
       snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
             P[PNr].BroadcastAddress[0], P[PNr].BroadcastAddress[1], P[PNr].BroadcastAddress[2], 
             P[PNr].BroadcastAddress[3], P[PNr].BroadcastAddress[4], P[PNr].BroadcastAddress[5]);
-      strcpy(Buf, "["); sprintf(BufNr, "%d", PNr); strcat(Buf, BufNr); strcat(Buf, "]: "); 
-      strcat(Buf, P[PNr].Name); strcat(Buf, ": MAC:");
-      strcat(Buf, macStr); strcat(Buf, ", Type=");
-      sprintf(BufNr, "%d", P[PNr].Type); strcat(Buf, BufNr);
+      sprintf(Buf, "[%d] %s: MAC= %s, Type=%d", PNr, P[PNr].Name, macStr, P[PNr].Type);
+      //strcpy(Buf, "["); sprintf(BufNr, "%d", PNr); strcat(Buf, BufNr); strcat(Buf, "]: "); 
+      //strcat(Buf, P[PNr].Name); strcat(Buf, ": MAC:");
+      //strcat(Buf, macStr); strcat(Buf, ", Type=");
+      //sprintf(BufNr, "%d", P[PNr].Type); strcat(Buf, BufNr);
       
       TFT.drawString(Buf, 10, 30+PNr+1*h);
 
@@ -418,7 +399,7 @@ void SendPairingRequest() {
   
   for (int Si=0 ; Si<MAX_PERIPHERALS; Si++) {
     if (S[Si].Type > 0) {
-      sprintf(BufNr, "%d", Si); strcpy(Buf, "S"); strcat(Buf, BufNr);
+      sprintf(BufNr, "S%d", Si); 
       doc[Buf] = S[Si].Name;
     }
   }
@@ -486,6 +467,75 @@ void ShowEichen() {
     TSScreenRefresh = millis();
   }
 }
+void ShowVoltCalib(float V) {
+char Buf[100] = {}; char BufNr[10] = {}; 
+  
+  if (OldMode != S_VOLTCALIB) TSScreenRefresh = millis(); 
+  if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
+    OldMode = Mode;
+    ScreenChanged = true;
+    
+    TFT.fillScreen(TFT_BLACK);
+  
+    TFT.drawString("Volt-Messung kalibrieren...", 10, 30);
+
+    if (Debug) Serial.println("Volt eichen...");
+    preferences.begin("JeepifyInit", false);
+
+    for (int SNr=0; SNr<MAX_PERIPHERALS; SNr++){
+      if (S[SNr].Type = SENS_TYPE_VOLT) {
+        int TempRead = analogRead(S[SNr].IOPort);
+        
+        if (Debug) {
+          Serial.print("S["); Serial.print(SNr); Serial.print("].Vin = ");
+          Serial.println(S[SNr].Vin, 4);
+          Serial.print("Volt(nachher) = ");
+          Serial.println(TempRead/S[SNr].Vin, 4);
+        }
+        S[SNr].Vin = TempRead / (float)doc["Value"];
+        
+        preferences.begin("JeepifyInit", false);
+        preferences.putFloat("Vin", S[SNr].Vin);
+        preferences.end();
+
+        dtostrf(TempRead, 0, 2, BufNr);
+        sprintf(Buf, "[%d] %s (Type: %d): Gemessene Spannung bei Null: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
+        TFT.drawString(Buf, 10, 30+PNr+1*h);
+
+        exit();
+      }
+    }
+  }
+    
+  nt h=20;
+    for(int SNr=0; SNr<MAX_PERIPHERALS; SNr++) {
+      if (S[SNr].Type == SENS_TYPE_AMP) {
+        float TempVal  = ads.readADC_SingleEnded(S[SNr].IOPort);
+        float TempVolt = ads.computeVolts(TempVal);
+        if (Debug) { 
+          Serial.print("TempVal:");     Serial.println(TempVal);
+          Serial.print(", TempVolt: "); Serial.println(TempVolt);
+        }
+        S[SNr].NullWert = TempVolt;
+        sprintf(Buf, "Null-%d", SNr); 
+        preferences.putFloat(Buf, S[SNr].NullWert);
+        if (Debug) {
+          Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(S[SNr].NullWert); 
+        }
+
+        dtostrf(TempVolt, 0, 2, BufNr);
+        sprintf(Buf, "[%d] %s (Type: %d): Gemessene Spannung bei Null: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
+        TFT.drawString(Buf, 10, 30+PNr+1*h);
+      }
+    }
+    preferences.end();
+    
+    delay(5000);
+    
+    Mode = S_MENU;
+    
+    TSScreenRefresh = millis();
+  }
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   char* buff = (char*) incomingData;        //char buffer
   jsondata = String(buff);                  //converting into STRING
@@ -549,51 +599,8 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
 
       // BatterySensor
       if (NODE_TYPE == BATTERY_SENSOR) {
-        if (doc["Order"] == "Eichen")        Eichen();
-        if (doc["Order"] == "VoltCalib") {
-          for (int SNr=0; SNr<MAX_PERIPHERALS; SNr++){
-            if (S[SNr].Type = SENS_TYPE_VOLT) {
-              int TempRead = analogRead(S[SNr].IOPort);
-              Serial.print("Volt(vorher) = "); Serial.println(TempRead/S[SNr].Vin, 4);
-              S[SNr].Vin = TempRead / (float)doc["Value"];
-              
-              if (Debug) {
-                Serial.print("S["); Serial.print(SNr); Serial.print("].Vin = ");
-                Serial.println(S[SNr].Vin, 4);
-                Serial.print("Volt(nachher) = ");
-                Serial.println(TempRead/S[SNr].Vin, 4);
-              }
-
-              preferences.begin("JeepifyInit", false);
-              preferences.putFloat("Vin", S[SNr].Vin);
-              preferences.end();
-            }
-          }
-        } 
-        if (doc["Order"] == "SetSensor0Sens") {
-          TempSens = (float) doc["Sens0"];
-          preferences.begin("JeepifyInit", false);
-            if (preferences.getFloat("Sens0", 0) != TempSens) preferences.putFloat("Sens0", TempSens);
-          preferences.end();
-        }
-        if (doc["Order"] == "SetSensor1Sens") {
-          TempSens = (float) doc["Sens1"];
-          preferences.begin("JeepifyInit", false);
-            if (preferences.getFloat("Sens1", 0) != TempSens) preferences.putFloat("Sens1", TempSens);
-          preferences.end();
-        }
-        if (doc["Order"] == "SetSensor2Sens") {
-          TempSens = (float) doc["Sens2"];
-          preferences.begin("JeepifyInit", false);
-            if (preferences.getFloat("Sens2", 0) != TempSens) preferences.putFloat("Sens2", TempSens);
-          preferences.end();
-        }
-        if (doc["Order"] == "SetSensor3Sens") {
-          TempSens = (float) doc["Sens3"];
-          preferences.begin("JeepifyInit", false);
-            if (preferences.getFloat("Sens3", 0) != TempSens) preferences.putFloat("Sens3", TempSens);
-          preferences.end();
-        }
+        if (doc["Order"] == "Eichen")      { Mode = S_EICHEN;    ShowEichen(); }
+        if (doc["Order"] == "VoltCalib")   { Mode = S_VOLTCALIB; ShowVoltCalib(); }
       }
       // PDC
       if ((NODE_TYPE == SWITCH_1_WAY) or (NODE_TYPE == SWITCH_2_WAY) or
@@ -698,46 +705,6 @@ void loop() {
       Serial.print("  Released: ");Serial.print(Touch.TSReleased);
       
       Serial.println(' ');
-    }
-    if (G == LONG_PRESS) {
-      Serial.print("(LongTouch) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(Touch.x1);
-      Serial.print("  y: ");Serial.print(Touch.y1);
-      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
-      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
-      Serial.println(' ');
-    } 
-    if (G == SWIPE_RIGHT) {
-      Serial.print("(SwipeRight) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(Touch.x1);
-      Serial.print("  y: ");Serial.print(Touch.y1);
-      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
-      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
-      Serial.println(' ');
-    } 
-    if (G == SWIPE_LEFT) {
-      Serial.print("(SwipeLeft) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(Touch.x1);
-      Serial.print("  y: ");Serial.print(Touch.y1);
-      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
-      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
-      Serial.println(' ');
-    } 
-    if (G == SWIPE_DOWN) {
-      Serial.print("(SwipeDown) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(Touch.x1);
-      Serial.print("  y: ");Serial.print(Touch.y1);
-      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
-      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
-      Serial.println(' ');
-    }
-    if (G == SWIPE_UP) {
-      Serial.print("(SwipeUp) Touch "); Serial.print(": ");;
-      Serial.print("  x: ");Serial.print(Touch.x1);
-      Serial.print("  y: ");Serial.print(Touch.y1);
-      Serial.print("  Pressed: ");Serial.print(Touch.TSTouched);
-      Serial.print("  Released: ");Serial.print(Touch.TSReleased);
-      Serial.println(' ');
     } 
   }
   if ((millis() - TSSend ) > MSG_INTERVAL  ) {
@@ -749,8 +716,9 @@ void loop() {
     TSPair = 0;
     ReadyToPair = false;
   }
-  if (Mode = S_PAIRING) {
-    ShowPairingScreen();
+  
+  switch (Mode) {
+    case S_PAIRING: ShowPairingScreen();
   }
   //PushTFT();
 }
