@@ -205,7 +205,7 @@ void GetPeers() {
   }
   preferences.end();
 }
-void ShowAllPreferences(){
+void ShowAllPreferences() {
   preferences.begin("JeepifyPeers", true);
   
   char Buf[10] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
@@ -229,8 +229,8 @@ void ShowAllPreferences(){
       strcpy(Buf, "Name-"); strcat(Buf, BufNr);
       // P.Name
       Serial.print(Buf); Serial.print(" = "); Serial.println(preferences.getString(Buf));
-  }
-  preferences.end();
+    }
+    preferences.end();
   
   preferences.begin("JeepifyInit", true);
   Serial.print("Debug = "); Serial.print(preferences.getBool("Debug"));
@@ -247,7 +247,6 @@ void ShowAllPreferences(){
   
   preferences.end();
   delay(30000);
-}
 }
 void ReportPeers() {
   TFT.fillScreen(TFT_BLACK);
@@ -514,7 +513,6 @@ void ShowVoltCalib(float V) {
     TSScreenRefresh = millis();
   }
 }
-
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   char* buff = (char*) incomingData;        //char buffer
   jsondata = String(buff);                  //converting into STRING
@@ -603,7 +601,6 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.print("\r\nLast Packet Send Status:\t");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
-
 void setup() {
   Serial.begin(74880);
   
@@ -675,7 +672,6 @@ void loop() {
   }
   //PushTFT();
 }
-
 float ReadAmp (int A) {
   /*float TempVal = ads.readADC_SingleEnded(S[A].IOPort);
   float TempVolt = ads.computeVolts(TempVal); 
@@ -712,7 +708,6 @@ bool isPeerEmpty(int PNr) {
 bool isSensorEmpty(int SNr) {
   return (S[SNr].Type == 0);
 }
-
 int   TouchRead() {
   uint16_t TouchX, TouchY;
   uint8_t  Gesture;
