@@ -443,8 +443,8 @@ void SetDebugMode(bool Mode) {
 }
 void ShowEichen() {
   char Buf[100] = {}; char BufNr[10] = {}; 
-
-  if (OldMode != S_EICHEN) TSScreenRefresh = millis();
+  
+  if (OldMode != S_EICHEN) TSScreenRefresh = millis(); 
   if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
     OldMode = Mode;
     ScreenChanged = true;
@@ -480,6 +480,8 @@ void ShowEichen() {
     preferences.end();
     
     delay(5000);
+    
+    Mode = S_MENU;
     
     TSScreenRefresh = millis();
   }
