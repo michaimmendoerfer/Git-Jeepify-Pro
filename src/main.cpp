@@ -348,12 +348,13 @@ void ShowPairingScreen() {
     int h=20;
     for (int PNr=0; PNr<MAX_PEERS; PNr++) {
       snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-            P[PNr].BroadcastAddress[0], P[PNr].BroadcastAddress[1], P[PNr].BroadcastAddress[2], P[PNr].BroadcastAddress[3], P[PNr].BroadcastAddress[4], P[PNr].BroadcastAddress[5]);
-      strcpy(Buf, macStr); strcat(Buf, ": ");
-      strcat(Buf, P[PNr].Name); strcat(Buf, " (Type: ");
+            P[PNr].BroadcastAddress[0], P[PNr].BroadcastAddress[1], P[PNr].BroadcastAddress[2], 
+            P[PNr].BroadcastAddress[3], P[PNr].BroadcastAddress[4], P[PNr].BroadcastAddress[5]);
+      strcpy(Buf, "["); sprintf(BufNr, "%d", PNr); strcat(Buf, BufNr); strcat(Buf, "]: "); 
+      strcat(Buf, P[PNr].Name); strcat(Buf, ": MAC:");
+      strcat(Buf, macStr); strcat(Buf, ", Type=");
       sprintf(BufNr, "%d", P[PNr].Type); strcat(Buf, BufNr);
-      strcat(Buf, ")");
-
+      
       TFT.drawString(Buf, 10, 30+PNr+1*h);
 
       TSScreenRefresh = millis();
@@ -440,31 +441,49 @@ void SetDebugMode(bool Mode) {
     if (preferences.getBool("Debug", false) != Debug) preferences.putBool("Debug", Debug);
   preferences.end();
 }
-void Eichen() {
-  char Buf[10] = {}; char BufNr[5] = {}; 
+void ShowEichen() {
+  char Buf[100] = {}; char BufNr[10] = {}; 
 
-  if (Debug) Serial.println("Eichen...");
-  preferences.begin("JeepifyInit", false);
+  if (OldMode != S_EICHEN) TSScreenRefresh = millis();
+  if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
+    OldMode = Mode;
+    ScreenChanged = true;
+    
+    TFT.fillScreen(TFT_BLACK);
+  
+    TFT.drawString("Eichen...", 10, 30);
 
-  for(int SNr=0; SNr<MAX_PERIPHERALS; SNr++) {
-    if (S[SNr].Type == SENS_TYPE_AMP) {
-      float TempVal  = ads.readADC_SingleEnded(S[SNr].IOPort);
-      float TempVolt = ads.computeVolts(TempVal);
-      if (Debug) { 
-        Serial.print("TempVal:");     Serial.println(TempVal);
-        Serial.print(", TempVolt: "); Serial.println(TempVolt);
+    if (Debug) Serial.println("Eichen...");
+    preferences.begin("JeepifyInit", false);
+    
+    int h=20;
+    for(int SNr=0; SNr<MAX_PERIPHERALS; SNr++) {
+      if (S[SNr].Type == SENS_TYPE_AMP) {
+        float TempVal  = ads.readADC_SingleEnded(S[SNr].IOPort);
+        float TempVolt = ads.computeVolts(TempVal);
+        if (Debug) { 
+          Serial.print("TempVal:");     Serial.println(TempVal);
+          Serial.print(", TempVolt: "); Serial.println(TempVolt);
+        }
+        S[SNr].NullWert = TempVolt;
+        sprintf(Buf, "Null-%d", SNr); 
+        preferences.putFloat(Buf, S[SNr].NullWert);
+        if (Debug) {
+          Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(S[SNr].NullWert); 
+        }
+
+        dtostrf(TempVolt, 0, 2, BufNr);
+        sprintf(Buf, "[%d] %s (Type: %d): Gemessene Spannung bei Null: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
+        TFT.drawString(Buf, 10, 30+PNr+1*h);
       }
-      S[SNr].NullWert = TempVolt;
-      sprintf(BufNr, "%d", SNr); strcpy(Buf, "Null-"); strcat(Buf, BufNr);
-      if (Debug) {
-        Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(S[SNr].NullWert); 
-      }
-      preferences.putFloat(Buf, S[SNr].NullWert);
     }
+    preferences.end();
+    
+    delay(5000);
+    
+    TSScreenRefresh = millis();
   }
-  preferences.end();
 }
-
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   char* buff = (char*) incomingData;        //char buffer
   jsondata = String(buff);                  //converting into STRING
