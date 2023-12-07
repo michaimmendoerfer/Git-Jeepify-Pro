@@ -1,8 +1,5 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
-//#include <SPI.h>
-//#include <FS.h>
-//#include <SPIFFS.h>
 #include "TAMC_GT911.h"
 #include <Adafruit_ADS1X15.h>
 #include "../../jeepify.h"
@@ -16,6 +13,7 @@
 
 #define NODE_NAME "Jeep_PRO_V1"
 #define NODE_TYPE BATTERY_SENSOR
+#define VERSION   "V 0.71"
 
 #define NAME_SENSOR_0 "Bat0"
 #define NAME_SENSOR_1 "Bat1"
@@ -23,11 +21,6 @@
 #define NAME_SENSOR_3 "Bat3"
 #define NAME_SENSOR_4 "Bat4"
 
-#define PIN_VOLTAGE
-
-#define VERSION   "V 0.70"
-
-#define MOD_PERIPHERALS 5
 #define PIN_VOLTAGE    35
 
 #define D5 12
@@ -93,8 +86,12 @@ void   SetDebugMode(bool Mode);
 
 void   Eichen();
 void   PrintMAC(const uint8_t * mac_addr);
- 
+
 int    TouchRead();
+
+bool   isPeerEmpty(int PNr);
+bool   isSensorEmpty(int SNr);
+
 
 void InitModule() {
   /*preferences.begin("JeepifyPeers", false);
@@ -158,23 +155,25 @@ void InitModule() {
 void SavePeers() {
   Serial.println("SavePeers...");
   preferences.begin("JeepifyPeers", false);
+  preferences.clear();
+  
   char Buf[10] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
 
   PeerCount = 0;
 
   for (int Pi=0; Pi< MAX_PEERS; Pi++) {
-    if (P[Pi].Type > 0) {
+    if (!isPeerEmpty(Pi)) {
       PeerCount++;
       //P.Type...
       sprintf(BufNr, "%d", Pi); strcpy(Buf, "Type-"); strcat(Buf, BufNr);
       Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(P[Pi].Type);
-      if (preferences.getInt(Buf, 0) != P[Pi].Type) preferences.putInt(Buf, P[Pi].Type);
+      preferences.putInt(Buf, P[Pi].Type);
       
       //P.Name
       strcpy(Buf, "Name-"); strcat(Buf, BufNr);
       BufS = P[Pi].Name;
       Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(BufS);
-      if (preferences.getString(Buf, "") != BufS) preferences.putString(Buf, BufS);
+      preferences.putString(Buf, BufS);
       
       //P.BroadcastAdress
       for (int b=0; b<6; b++) {
@@ -184,7 +183,7 @@ void SavePeers() {
       }
     }
   }
-  if (preferences.getInt("PeerCount") != PeerCount) preferences.putInt("PeerCount", PeerCount);
+  preferences.putInt("PeerCount", PeerCount);
 
   preferences.end();
 }
@@ -195,10 +194,12 @@ void GetPeers() {
   
   PeerCount = 0;
   for (int Pi=0; Pi<MAX_PEERS; Pi++) {
+    sprintf(BufNr, "%d", Pi); 
+
     // Peer gefüllt?
-    sprintf(BufNr, "%d", Pi); strcpy(Buf, "Type-"); strcat(Buf, BufNr);
-    Serial.print("getInt("); Serial.print(Buf); Serial.print(" = "); Serial.print(preferences.getInt(Buf));
-    if (preferences.getInt(Buf) > 0) {
+    strcpy(Buf, "Type-"); strcat(Buf, BufNr);
+    if (Debug) { Serial.print("getInt("); Serial.print(Buf); Serial.print(" = "); Serial.print(preferences.getInt(Buf)); }
+    if (preferences.getInt(Buf,0) > 0) {
       PeerCount++;
       // P.Type
       P[Pi].Type = preferences.getInt(Buf);
@@ -212,10 +213,11 @@ void GetPeers() {
       strcpy(Buf, "Name-"); strcat(Buf, BufNr);
       BufS = preferences.getString(Buf);
       strcpy(P[Pi].Name, BufS.c_str());
+      
       if (Debug) {
-        Serial.print(Pi); Serial.print(": Type="); Serial.print(P[Pi].Type); 
+        Serial.print("GetPeers: P["); Serial.print(Pi); Serial.print("]: Type="); Serial.print(P[Pi].Type); 
         Serial.print(", Name="); Serial.print(P[Pi].Name);
-        Serial.print(", MAC="); PrintMAC(P[Pi].BroadcastAddress);
+        Serial.print(", MAC="); PrintMAC(P[Pi].BroadcastAddress); Serial.println();
       }
     }
   }
@@ -273,22 +275,22 @@ void ReportPeers() {
   TFT.println("Peer-Report:");
   TFT.println();
 
-  for (int Pi=0; Pi<MAX_PEERS; Pi++) {
+  for (int PNr=0; PNr<MAX_PEERS; PNr++) {
     if (Debug) {
-      Serial.println(P[Pi].Name);
-      Serial.println(P[Pi].Type);
-      Serial.print("MAC: "); PrintMAC(P[Pi].BroadcastAddress);
+      Serial.println(P[PNr].Name);
+      Serial.println(P[PNr].Type);
+      Serial.print("MAC: "); PrintMAC(P[PNr].BroadcastAddress);
       Serial.println();
     }
     
     char macStr[18];
     snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-           P[Pi].BroadcastAddress[0], P[Pi].BroadcastAddress[1], P[Pi].BroadcastAddress[2], P[Pi].BroadcastAddress[3], P[Pi].BroadcastAddress[4], P[Pi].BroadcastAddress[5]);
+           P[PNr].BroadcastAddress[0], P[PNr].BroadcastAddress[1], P[PNr].BroadcastAddress[2], 
+           P[PNr].BroadcastAddress[3], P[PNr].BroadcastAddress[4], P[PNr].BroadcastAddress[5]);
 
-    TFT.print(P[Pi].Name); TFT.print(" - Type:"); TFT.print(P[Pi].Type);
+    TFT.print("["); TFT.print(PNr); TFT.print("]-"); TFT.print(P[PNr].Name); TFT.print(": - Type:"); TFT.print(P[PNr].Type);
     TFT.print(" - MAC:"); TFT.println(macStr);
   }
-  delay(5000);
 }
 void RegisterPeers() {
   esp_now_peer_info_t peerInfo;
@@ -306,14 +308,14 @@ void RegisterPeers() {
     }
 
   // Register Peers
-  for (int Pi=0; Pi<MAX_PEERS; Pi++) {
-    if (P[Pi].Type > 0) {
-      for (int b=0; b<6; b++) peerInfo.peer_addr[b] = (uint8_t) P[Pi].BroadcastAddress[b];
+  for (int PNr=0; PNr<MAX_PEERS; PNr++) {
+    if (!isPeerEmpty(PNr) {
+      for (int b=0; b<6; b++) peerInfo.peer_addr[b] = (uint8_t) P[PNr].BroadcastAddress[b];
         if (esp_now_add_peer(&peerInfo) != ESP_OK) {
           PrintMAC(peerInfo.peer_addr); Serial.println(": Failed to add peer");
         }
         else {
-          Serial.print("Peer: "); Serial.print(P[Pi].Name); 
+          Serial.print("Peer: "); Serial.print(P[PNr].Name); 
           Serial.print (" ("); PrintMAC(peerInfo.peer_addr); Serial.println(") added...");
         }
     }
@@ -762,6 +764,13 @@ float ReadVolt(int V) {
   } 
   return TempVolt;
 }
+bool isPeerEmpty(int PNr) {
+  return (P[PNr].Type == 0);
+}
+bool isSensorEmpty(int SNr) {
+  return (S[SNr].Type == 0);
+}
+
 int   TouchRead() {
   uint16_t TouchX, TouchY;
   uint8_t  Gesture;
