@@ -547,9 +547,11 @@ void ShowVoltCalib(float V) {
         preferences.putFloat("Vin", S[SNr].Vin);
         preferences.end();
 
-        dtostrf(TempRead, 0, 2, BufNr);
-        sprintf(Buf, "[%d] %s (Type: %d): Gemessene Spannung bei Null: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
+        dtostrf(TempRead/S[SNr].Vin, 0, 2, BufNr);
+        sprintf(Buf, "[%d] %s (Type: %d): Spannung ist jetzt: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
+        
         TFT.drawString(Buf, 10, 30+SNr+1*h);
+        AddStatus(Buf);
 
         break;
       }
