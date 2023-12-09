@@ -322,11 +322,11 @@ void ClearInit() {
   preferences.end();
 }
 void ShowPairingScreen() {
-  char Buf[100] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
-  char macStr[18];
-
   if (OldMode != S_PAIRING) TSScreenRefresh = millis();
   if ((millis() - TSScreenRefresh > 1000) or (Mode != OldMode)) {
+    char Buf[100] = {}; 
+    char macStr[18];
+
     OldMode = Mode;
     ScreenChanged = true;
 
@@ -345,15 +345,10 @@ void ShowPairingScreen() {
             P[PNr].BroadcastAddress[0], P[PNr].BroadcastAddress[1], P[PNr].BroadcastAddress[2], 
             P[PNr].BroadcastAddress[3], P[PNr].BroadcastAddress[4], P[PNr].BroadcastAddress[5]);
       sprintf(Buf, "[%d] %s: MAC= %s, Type=%d", PNr, P[PNr].Name, macStr, P[PNr].Type);
-      //strcpy(Buf, "["); sprintf(BufNr, "%d", PNr); strcat(Buf, BufNr); strcat(Buf, "]: "); 
-      //strcat(Buf, P[PNr].Name); strcat(Buf, ": MAC:");
-      //strcat(Buf, macStr); strcat(Buf, ", Type=");
-      //sprintf(BufNr, "%d", P[PNr].Type); strcat(Buf, BufNr);
       
       TFT.drawString(Buf, 10, 30+(PNr+1)*h);
-
-      TSScreenRefresh = millis();
     }
+    TSScreenRefresh = millis();
   }
 }
 void PushTFT() {
@@ -390,7 +385,7 @@ void SendMessage () {
   serializeJson(doc, jsondata);  
   
   for (int PNr=0; PNr<MAX_PEERS; PNr++) {
-    if (P[PNr].Type > 10) {
+    if (P[PNr].Type > 9) {
       Serial.print("Sending to: "); Serial.println(P[PNr].Name); 
       Serial.print(" ("); PrintMAC(P[PNr].BroadcastAddress); Serial.println(")");
       esp_now_send(P[PNr].BroadcastAddress, (uint8_t *) jsondata.c_str(), 200);  //Sending "jsondata"  
@@ -403,7 +398,7 @@ void SendMessage () {
   AddStatus(jsondata);
 }
 void SendPairingRequest() {
-  char Buf[10] = {}; char BufNr[5] = {}; 
+  char Buf[10] = {};
 
   jsondata = "";  //clearing String after data is being sent
   doc.clear();
@@ -414,7 +409,7 @@ void SendPairingRequest() {
   
   for (int Si=0 ; Si<MAX_PERIPHERALS; Si++) {
     if (S[Si].Type > 0) {
-      sprintf(BufNr, "S%d", Si); 
+      sprintf(Buf, "S%d", Si); 
       doc[Buf] = S[Si].Name;
     }
   }
@@ -438,10 +433,10 @@ void SetDebugMode(bool Mode) {
   preferences.end();
 }
 void ShowEichen() {
-  char Buf[100] = {}; char BufNr[10] = {}; 
-  
   if (OldMode != S_EICHEN) TSScreenRefresh = millis(); 
   if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
+    char Buf[100] = {};
+  
     OldMode = Mode;
     ScreenChanged = true;
     
@@ -474,15 +469,16 @@ void ShowEichen() {
         }
 
         dtostrf(TempVolt, 0, 2, BufNr);
-        sprintf(Buf, "[%d] %s (Type: %d): Gemessene Spannung bei Null: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
+        sprintf(Buf, "Eichen fertig: [%d] %s (Type: %d): Gemessene Spannung bei Null: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
         TFT.drawString(Buf, 10, 30+SNr+1*h);
+        AddStatus(Buf);
       }
     }
     preferences.end();
     
     delay(5000);
     
-    Mode = S_MENU;
+    Mode = S_STATUS;
     
     TSScreenRefresh = millis();
   }
@@ -512,7 +508,7 @@ void ShowStatus() {
     int h=20;
     for(int SNr=0; SNr<MAX_STATUS; SNr++) {
       char Buf[20];
-      sprintf(Buf, "%d:%d", (int)Status[SNr].TSMsg/60000%60, (int)Status[SNr].TSMsg/1000%60);
+      sprintf(Buf, "%d%:2d:%2d", (int)Status[SNr].TSMsg/360000%60, (int)Status[SNr].TSMsg/60000%60, (int)Status[SNr].TSMsg/1000%60);
       TFT.drawString(Buf, 10, 30+(SNr+1)*h);
       TFT.drawString(Status[SNr].Msg, 75, 30+(SNr+1)*h);
     }
@@ -704,7 +700,7 @@ void setup() {
 }
 void loop() {
   int G;
-  if ((millis() - TSTouch) > TOUCH_INTERVAL) {
+  if  ((millis() - TSTouch) > TOUCH_INTERVAL) {
     G = TouchRead();
     TSTouch = millis();
     if (G == CLICK) {
@@ -712,12 +708,12 @@ void loop() {
       else if (Mode == S_PAIRING) Mode = S_STATUS;
     } 
   }
-  if ((millis() - TSSend ) > MSG_INTERVAL  ) {
+  if  ((millis() - TSSend ) > MSG_INTERVAL  ) {
     TSSend = millis();
     if (ReadyToPair) SendPairingRequest();
     else SendMessage();
   }
-  if ((TSPair) and (millis() - TSPair > WAIT_FOR_MAMA )) {
+  if (((millis() - TSPair ) > PAIR_INTERVAL ) and (ReadyToPair)) {
     TSPair = 0;
     ReadyToPair = false;
     AddStatus("Pairing beendet...");
@@ -760,10 +756,10 @@ float ReadVolt(int V) {
   } 
   return TempVolt;
 }
-bool isPeerEmpty(int PNr) {
+bool  isPeerEmpty(int PNr) {
   return (P[PNr].Type == 0);
 }
-bool isSensorEmpty(int SNr) {
+bool  isSensorEmpty(int SNr) {
   return (S[SNr].Type == 0);
 }
 int   TouchRead() {
