@@ -381,6 +381,8 @@ void SendMessage () {
       doc[S[SNr].Name], buf;
     }
   }
+  doc["Sleep"] = SleepMode;
+  doc["Debug"] = Debug;
 
   serializeJson(doc, jsondata);  
   
@@ -435,7 +437,7 @@ void SetDebugMode(bool Mode) {
 void ShowEichen() {
   if (OldMode != S_EICHEN) TSScreenRefresh = millis(); 
   if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
-    char Buf[100] = {};
+    char Buf[100] = {}; char BufNr[10] = {};
   
     OldMode = Mode;
     ScreenChanged = true;
@@ -497,28 +499,34 @@ void ShowStatus() {
     OldMode = Mode;
     ScreenChanged = true;
     
-    TFTBuffer.loadFont(AA_FONT_LARGE);
+    TFT.loadFont(AA_FONT_LARGE);
     
-    TFTBuffer.setTextColor(TFT_RUBICON, TFT_BLACK);
-    TFTBuffer.setTextDatum(TC_DATUM);
+    TFT.setTextColor(TFT_RUBICON, TFT_BLACK);
+    TFT.setTextPadding(469);
+    TFT.setTextDatum(TC_DATUM);
 
-    TFT.fillScreen(TFT_BLACK); 
     TFT.drawString("Status...", 10, 30);
+    TFT.unloadFont();
 
+    TFT.loadFont(AA_FONT_SMALL);
+    TFT.setTextColor(TFT_WHITE, TFT_BLACK);
+    
     int h=20;
     for(int SNr=0; SNr<MAX_STATUS; SNr++) {
       char Buf[20];
-      sprintf(Buf, "%d%:2d:%2d", (int)Status[SNr].TSMsg/360000%60, (int)Status[SNr].TSMsg/60000%60, (int)Status[SNr].TSMsg/1000%60);
+      sprintf(Buf, "%02d:%02d:%02d", (int)Status[SNr].TSMsg/360000%60, (int)Status[SNr].TSMsg/60000%60, (int)Status[SNr].TSMsg/1000%60);
       TFT.drawString(Buf, 10, 30+(SNr+1)*h);
       TFT.drawString(Status[SNr].Msg, 75, 30+(SNr+1)*h);
     }
     TSScreenRefresh = millis();
+    TFT.unloadFont();
+    TFT.setTextPadding(0);
   }
 }
 void ShowVoltCalib(float V) {
   char Buf[100] = {}; char BufNr[10] = {}; 
   
-  if (OldMode != S_VOLTCALIB) TSScreenRefresh = millis(); 
+  if (OldMode != S_CAL_VOL) TSScreenRefresh = millis(); 
   if ((millis() - TSScreenRefresh > 1000) or (Mode != OldMode)) {
     OldMode = Mode;
     ScreenChanged = true;
@@ -627,8 +635,8 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
 
       // BatterySensor
       if (NODE_TYPE == BATTERY_SENSOR) {
-        if (doc["Order"] == "Eichen")      { Mode = S_EICHEN;    AddStatus("Eichen beginnt"); ShowEichen(); }
-        if (doc["Order"] == "VoltCalib")   { Mode = S_VOLTCALIB; AddStatus("VoltCalib beginnt"); ShowVoltCalib((float)doc["Value"]); }
+        if (doc["Order"] == "Eichen")      { Mode = S_EICHEN;  AddStatus("Eichen beginnt"); ShowEichen(); }
+        if (doc["Order"] == "VoltCalib")   { Mode = S_CAL_VOL; AddStatus("VoltCalib beginnt"); ShowVoltCalib((float)doc["Value"]); }
       }
       // PDC
       if ((NODE_TYPE == SWITCH_1_WAY) or (NODE_TYPE == SWITCH_2_WAY) or
