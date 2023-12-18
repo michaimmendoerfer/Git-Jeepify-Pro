@@ -165,11 +165,9 @@ void SavePeers() {
       preferences.putString(Buf, BufS);
       
       //P.BroadcastAdress
-      for (int b=0; b<6; b++) {
-        sprintf(BufB, "%d", b); 
-        strcpy(Buf, "MAC"); strcat(Buf, BufB); strcat (Buf, "-"); strcat (Buf, BufNr);
-        preferences.putBytes(Buf, P[Pi].BroadcastAddress, 6);
-      }
+      sprintf(Buf, "MAC-%d", Pi); 
+      preferences.putBytes(Buf, P[Pi].BroadcastAddress, 6);
+      Serial.print(Buf); Serial.print("="); PrintMAC(P[Pi].BroadcastAddress); Serial.println();
     }
   }
   preferences.putInt("PeerCount", PeerCount);
@@ -193,7 +191,7 @@ void GetPeers() {
       // P.Type
       P[Pi].Type = preferences.getInt(Buf);
       // P.BroadcastAdress
-      strcpy(Buf, "MAC-"); strcat (Buf, BufNr);
+      sprintf(Buf, "MAC-%d", Pi); 
       preferences.getBytes(Buf, P[Pi].BroadcastAddress, 6);
       
       P[Pi].TSLastSeen = millis();
@@ -322,7 +320,7 @@ void ClearInit() {
   preferences.end();
 }
 void ShowPairingScreen() {
-  if (OldMode != S_PAIRING) TSScreenRefresh = millis();
+  if (OldMode != Mode) TSScreenRefresh = millis();
   if ((millis() - TSScreenRefresh > 1000) or (Mode != OldMode)) {
     char Buf[100] = {}; 
     char macStr[18];
@@ -397,7 +395,7 @@ void SendMessage () {
   }
 
   if (Debug) { Serial.print("\nSending: "); Serial.println(jsondata); }
-  AddStatus(jsondata);
+  AddStatus("SendStatus");
 }
 void SendPairingRequest() {
   char Buf[10] = {};
@@ -410,17 +408,17 @@ void SendPairingRequest() {
   doc["Pairing"] = "add me";
   
   for (int Si=0 ; Si<MAX_PERIPHERALS; Si++) {
-    if (S[Si].Type > 0) {
-      sprintf(Buf, "S%d", Si); 
-      doc[Buf] = S[Si].Name;
-    }
+    sprintf(Buf, "T%d", Si); 
+    doc[Buf] = S[Si].Type;
+    sprintf(Buf, "N%d", Si); 
+    doc[Buf] = S[Si].Name;
   }
   serializeJson(doc, jsondata);  
 
   esp_now_send(broadcastAddressAll, (uint8_t *) jsondata.c_str(), 200);  //Sending "jsondata"  
   
   if (Debug) { Serial.print("\nSending: "); Serial.println(jsondata); }
-  AddStatus(jsondata);                                       
+  AddStatus("Send Pairing request...");                                       
 }
 void SetSleepMode(bool Mode) {
   preferences.begin("JeepifyInit", false);
@@ -494,7 +492,7 @@ void AddStatus(String Msg) {
   Status[0].TSMsg = millis();
 }
 void ShowStatus() {
-  if (OldMode != S_STATUS) { TSScreenRefresh = millis(); TFT.fillScreen(TFT_BLACK); }
+  if (OldMode != Mode) { TSScreenRefresh = millis(); TFT.fillScreen(TFT_BLACK); }
   if ((millis() - TSScreenRefresh > 1000) or (Mode != OldMode)) {
     OldMode = Mode;
     ScreenChanged = true;
@@ -503,20 +501,20 @@ void ShowStatus() {
     
     TFT.setTextColor(TFT_RUBICON, TFT_BLACK);
     TFT.setTextPadding(469);
-    TFT.setTextDatum(TC_DATUM);
+    TFT.setTextDatum(TL_DATUM);
 
-    TFT.drawString("Status...", 10, 30);
+    TFT.drawString("Status...", 10, 10);
     TFT.unloadFont();
 
-    TFT.loadFont(AA_FONT_SMALL);
+    //TFT.loadFont(AA_FONT_MONO);
     TFT.setTextColor(TFT_WHITE, TFT_BLACK);
     
     int h=20;
     for(int SNr=0; SNr<MAX_STATUS; SNr++) {
       char Buf[20];
       sprintf(Buf, "%02d:%02d:%02d", (int)Status[SNr].TSMsg/360000%60, (int)Status[SNr].TSMsg/60000%60, (int)Status[SNr].TSMsg/1000%60);
-      TFT.drawString(Buf, 10, 30+(SNr+1)*h);
-      TFT.drawString(Status[SNr].Msg, 75, 30+(SNr+1)*h);
+      TFT.drawString(Buf, 10, 40+(SNr+1)*h);
+      TFT.drawString(Status[SNr].Msg, 75, 40+(SNr+1)*h);
     }
     TSScreenRefresh = millis();
     TFT.unloadFont();
@@ -613,6 +611,7 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
                 Serial.print("Saving Peers after received new one...");
                 ReportPeers();
               }
+              ReadyToPair = false;
             }
           }
           if (!PairingSuccess) { PrintMAC(mac); Serial.println(" adding failed..."); } 
@@ -689,7 +688,7 @@ void setup() {
   Serial.println("InitModule...");
   InitModule();
   Debug = true;
-
+  //ClearPeers();
   Serial.println("GetPeers...");
   GetPeers();
   Serial.println("ReportPeers...");
@@ -698,14 +697,12 @@ void setup() {
   RegisterPeers();
   Serial.println("RegisterPeers fertig...");
 
-  if (PeerCount == 0) { ReadyToPair = true; TSPair = millis(); }
+  if (PeerCount == 0) { AddStatus("Pairing beginnt"); ReadyToPair = true; TSPair = millis(); }
   
   TSScreenRefresh = millis();
 
   AddStatus("Init fertig");
-  ReadyToPair = true;
-  TSPair = millis();
-  AddStatus("Pairing beginnt"); 
+
   //free Pins
 }
 void loop() {
@@ -713,6 +710,7 @@ void loop() {
   if  ((millis() - TSTouch) > TOUCH_INTERVAL) {
     G = TouchRead();
     TSTouch = millis();
+    if (G == LONG_PRESS) {ClearPeers(); ESP.restart();}  
     if (G == CLICK) {
       if (Mode == S_STATUS) Mode = S_PAIRING;
       else if (Mode == S_PAIRING) Mode = S_STATUS;
@@ -781,49 +779,46 @@ int   TouchRead() {
 
   tp.read();
   
-  TouchContact = tp.isTouched;
+  Touch.Touched = tp.isTouched;
   TouchX = tp.points[0].x;
   TouchY = tp.points[0].y;
   
-  //frisch berührt
-  if (TouchContact and !Touch.TSTouched) {       
-    Touch.TSTouched = millis();
-    Touch.x0 = TouchX;
+  if(Touch.Touched && !Touch.TouchedOld) {
+    Touch.x0 = TouchX;    // erste Berührung
     Touch.y0 = TouchY;
-    Touch.Gesture = 0;
-    Touch.TSReleased = 0;
+    Touch.TSFirstTouch = millis();
+    Touch.TSReleaseTouch = 0;
     ret = TOUCHED;
-  }
-  //Finger bleibt drauf
-  else if (TouchContact and Touch.TSTouched) {   
-    Touch.x0 = TouchX;
-    Touch.y0 = TouchY;
-    Touch.Gesture = 0;
-    Touch.TSReleased = 0;
+  } 
+  else if (Touch.Touched && Touch.TouchedOld) { 
+    Touch.x1 = TouchX;     // gehalten
+    Touch.y1 = TouchY;
     ret = HOLD;
   }
-  //Release
-  else if (!TouchContact and Touch.TSTouched) {  
-    Touch.TSReleased = millis();
-    Touch.x1 = TouchX;
+  else if (!Touch.Touched && Touch.TouchedOld) {
+    Touch.x1 = TouchX;     // losgelassen
     Touch.y1 = TouchY;
-          
-         if ((Touch.x1-Touch.x0) > 50)  { Touch.Gesture = SWIPE_LEFT;  ret = SWIPE_LEFT; }                      // swipe left
-    else if ((Touch.x1-Touch.x0) < -50) { Touch.Gesture = SWIPE_RIGHT; ret = SWIPE_RIGHT; }                     // swipe right
+    Touch.TSReleaseTouch = millis();
+         if ((Touch.x1-Touch.x0) > 50)  { Touch.Gesture = SWIPE_RIGHT;  ret = SWIPE_RIGHT; }                      // swipe left
+    else if ((Touch.x1-Touch.x0) < -50) { Touch.Gesture = SWIPE_LEFT; ret = SWIPE_LEFT; }                     // swipe right
     else if ((Touch.y1-Touch.y0) > 50)  { Touch.Gesture = SWIPE_DOWN;  ret = SWIPE_DOWN; }                      // swipe down
     else if ((Touch.y1-Touch.y0) < -50) { Touch.Gesture = SWIPE_UP;    ret = SWIPE_UP; }                        // swipe up
-    else if ((Touch.TSReleased - Touch.TSTouched) > LONG_PRESS_INTERVAL) {                                      // longPress
-      Touch.Gesture = LONG_PRESS;
-      ret = LONG_PRESS;     
-    }  
-    else { Touch.Gesture = CLICK; ret = CLICK; }
-  }                                                                    
-  //nicht berührt
-  else if (!TouchContact and !Touch.TSTouched) {  
-    ret = 0;
-    Touch.TSTouched  = 0;
-    Touch.TSReleased = 0;
+    else if ((Touch.TSReleaseTouch - Touch.TSFirstTouch) > LONG_PRESS_INTERVAL)                                 // longPress
+                                        { Touch.Gesture = LONG_PRESS;  ret = LONG_PRESS; }
+    else                                { Touch.Gesture = CLICK; ret = CLICK; }
   }
+  else if (!Touch.Touched && !Touch.TouchedOld) {
+    Touch.x0 = 0;    // nix
+    Touch.y0 = 0;
+    Touch.x1 = 0;
+    Touch.y1 = 0;
+    Touch.Gesture = 0;
+    Touch.TSFirstTouch = 0;
+    Touch.TSReleaseTouch = 0;
+    ret = 0;
+  }
+  Touch.TouchedOld = Touch.Touched;  
+
   return ret;
 }
 void  PrintMAC(const uint8_t * mac_addr){
