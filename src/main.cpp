@@ -84,7 +84,6 @@ void   RegisterPeers();
 void   ClearPeers();
 void   ClearInit();
 
-void   PushTFT();
 void   ShowPairingScreen();
 void   ShowEichen();
 void   ShowVoltCalib(float V);
@@ -92,6 +91,7 @@ void   ShowVoltCalib(float V);
 void   SetSleepMode(bool Mode);
 void   SetDebugMode(bool Mode);
 void   AddStatus(String Msg);
+void   ShowStatus();
 
 void   Eichen();
 void   PrintMAC(const uint8_t * mac_addr);
@@ -142,27 +142,32 @@ void InitModule() {
   Serial.println("InitModule() fertig...");
 }
 void SavePeers() {
+  // Speichert alle bekannten Peers
+  // Type-0 (int)
+  // Name-0 (String)
+  // MAC-0  (6 Bytes)
+
   Serial.println("SavePeers...");
   preferences.begin("JeepifyPeers", false);
   preferences.clear();
   
-  char Buf[10] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
+  char Buf[50] = {}; String BufS;
 
   PeerCount = 0;
 
-  for (int Pi=0; Pi< MAX_PEERS; Pi++) {
+  for (int Pi=0; Pi< MAX_PEERS; Pi++) {                         
     if (!isPeerEmpty(Pi)) {
       PeerCount++;
       //P.Type...
-      sprintf(BufNr, "%d", Pi); strcpy(Buf, "Type-"); strcat(Buf, BufNr);
-      Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(P[Pi].Type);
+      sprintf(Buf, "Type-%d", Pi); 
       preferences.putInt(Buf, P[Pi].Type);
+      Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(P[Pi].Type);
       
       //P.Name
-      strcpy(Buf, "Name-"); strcat(Buf, BufNr);
+      sprintf(Buf, "Name-%d", Pi); 
       BufS = P[Pi].Name;
-      Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(BufS);
       preferences.putString(Buf, BufS);
+      Serial.print("schreibe "); Serial.print(Buf); Serial.print(" = "); Serial.println(BufS);
       
       //P.BroadcastAdress
       sprintf(Buf, "MAC-%d", Pi); 
@@ -175,32 +180,38 @@ void SavePeers() {
   preferences.end();
 }
 void GetPeers() {
+  // liest alle nicht leeren (Type>0) bekannten Peers
+  // Type-0 (int)
+  // Name-0 (String)
+  // MAC-0  (6 Bytes)
+
   preferences.begin("JeepifyPeers", true);
   
-  char Buf[10] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
+  char Buf[50] = {}; String BufS;
   
   PeerCount = 0;
   for (int Pi=0; Pi<MAX_PEERS; Pi++) {
-    sprintf(BufNr, "%d", Pi); 
-
+  
     // Peer gefüllt?
-    strcpy(Buf, "Type-"); strcat(Buf, BufNr);
-    if (Debug) { Serial.print("getInt("); Serial.print(Buf); Serial.print(" = "); Serial.print(preferences.getInt(Buf)); }
+    sprintf(Buf, "Type-%d", Pi); 
     if (preferences.getInt(Buf,0) > 0) {
       PeerCount++;
-      // P.Type
+
+      // Type-0
+      sprintf(Buf, "Type-%d", Pi); 
       P[Pi].Type = preferences.getInt(Buf);
-      // P.BroadcastAdress
+      
+      // Name-0
+      sprintf(Buf, "Name-%d", Pi); 
+      BufS = preferences.getString(Buf);
+      strcpy(P[Pi].Name, BufS.c_str());
+      
+      // MAC-0
       sprintf(Buf, "MAC-%d", Pi); 
       preferences.getBytes(Buf, P[Pi].BroadcastAddress, 6);
       
       P[Pi].TSLastSeen = millis();
-      
-      // P.Name
-      strcpy(Buf, "Name-"); strcat(Buf, BufNr);
-      BufS = preferences.getString(Buf);
-      strcpy(P[Pi].Name, BufS.c_str());
-      
+
       if (Debug) {
         Serial.print("GetPeers: P["); Serial.print(Pi); Serial.print("]: Type="); Serial.print(P[Pi].Type); 
         Serial.print(", Name="); Serial.print(P[Pi].Name);
@@ -209,49 +220,6 @@ void GetPeers() {
     }
   }
   preferences.end();
-}
-void ShowAllPreferences() {
-  preferences.begin("JeepifyPeers", true);
-  
-  char Buf[10] = {}; char BufNr[5] = {}; char BufB[5] = {}; String BufS;
-  
-  PeerCount = 0;
-  for (int Pi=0; Pi<MAX_PEERS; Pi++) {
-    // Peer gefüllt?
-    sprintf(BufNr, "%d", Pi); strcpy(Buf, "Type-"); strcat(Buf, BufNr);
-    Serial.print("getInt("); Serial.print(Buf); Serial.print(" = "); Serial.print(preferences.getInt(Buf));
-    if (preferences.getInt(Buf) > 0) {
-      PeerCount++;
-      // P.Type
-      Serial.print(Buf); Serial.print(" = "); Serial.print(preferences.getInt(Buf));
-      // P.BroadcastAdress
-      for (int b=0; b<6; b++) {
-        sprintf(BufB, "%d", b); 
-        strcpy(Buf, "B"); strcat(Buf, BufB); strcat (Buf, "-"); strcat (Buf, BufNr);
-        Serial.print(Buf); Serial.print(" = "); Serial.print(preferences.getUChar(Buf));
-      }
-      Serial.println();
-      strcpy(Buf, "Name-"); strcat(Buf, BufNr);
-      // P.Name
-      Serial.print(Buf); Serial.print(" = "); Serial.println(preferences.getString(Buf));
-    }
-    preferences.end();
-  }
-  preferences.begin("JeepifyInit", true);
-  Serial.print("Debug = "); Serial.print(preferences.getBool("Debug"));
-  Serial.print("SleepMode = "); Serial.print(preferences.getBool("SleepMode"));
-  Serial.print("Null-0 = "); Serial.println(preferences.getInt("Null-0"));
-  Serial.print("Null-1 = "); Serial.println(preferences.getInt("Null-1"));
-  Serial.print("Null-2 = "); Serial.println(preferences.getInt("Null-2"));
-  Serial.print("Null-3 = "); Serial.println(preferences.getInt("Null-3"));
-  Serial.print("Sens-0 = ");    Serial.println(preferences.getFloat("Sens-0"));
-  Serial.print("Sens-1 = ");    Serial.println(preferences.getFloat("Sens-1"));
-  Serial.print("Sens-2 = ");    Serial.println(preferences.getFloat("Sens-2"));
-  Serial.print("Sens-3 = ");    Serial.println(preferences.getFloat("Sens-3"));
-  Serial.print("Vin = ")   ; Serial.println(preferences.getInt("Vin"));
-  
-  preferences.end();
-  delay(30000);
 }
 void ReportPeers() {
   TFT.fillScreen(TFT_BLACK);
@@ -349,14 +317,6 @@ void ShowPairingScreen() {
     TSScreenRefresh = millis();
   }
 }
-void PushTFT() {
-  if (ScreenChanged) {
-    Serial.print("ScreenUpdate: ");
-    Serial.println(UpdateCount);
-    TFTBuffer.pushSprite(0, 0);
-    ScreenChanged = false;
-  }
-}
 void SendMessage () {
   char buf[10];
   doc.clear();
@@ -398,6 +358,7 @@ void SendMessage () {
   AddStatus("SendStatus");
 }
 void SendPairingRequest() {
+  // sendet auf Broadcast: "addme", T0:Type, N0:Name, T1:Type, N1:Name...
   char Buf[10] = {};
 
   jsondata = "";  //clearing String after data is being sent
