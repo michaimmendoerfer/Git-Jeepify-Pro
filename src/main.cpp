@@ -318,7 +318,8 @@ void ShowPairingScreen() {
   }
 }
 void SendMessage () {
-  char buf[10];
+  //sendet NAME0:Value0, NAME1:Value1, SLEEP:Status, DEBUG:Status
+  char buf[50];
   doc.clear();
   jsondata = "";
 
@@ -343,7 +344,7 @@ void SendMessage () {
   doc["Debug"] = Debug;
 
   serializeJson(doc, jsondata);  
-  
+  //senden an alle Monitore
   for (int PNr=0; PNr<MAX_PEERS; PNr++) {
     if (P[PNr].Type > 9) {
       Serial.print("Sending to: "); Serial.println(P[PNr].Name); 
