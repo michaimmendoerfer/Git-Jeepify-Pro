@@ -108,31 +108,31 @@ void InitModule() {
   SleepMode = preferences.getBool("SleepMode", false);
   
   strcpy(S[0].Name, NAME_SENSOR_0);
-  S[0].Type     = 1;
+  S[0].Type     = SENS_TYPE_AMP;
   S[0].IOPort   = 0;
   S[0].NullWert = preferences.getInt("Null-0", 3134);
   S[0].VperAmp  = preferences.getFloat("Sens-0", 0.066);
 
   strcpy(S[1].Name, NAME_SENSOR_1);
-  S[1].Type     = 1;
+  S[1].Type     = SENS_TYPE_AMP;
   S[1].IOPort   = 1;
   S[1].NullWert = preferences.getInt("Null-1", 3134);
   S[1].VperAmp  = preferences.getFloat("Sens-1", 0.066);
 
   strcpy(S[2].Name, NAME_SENSOR_2);
-  S[2].Type     = 1;
+  S[2].Type     = SENS_TYPE_AMP;
   S[2].IOPort   = 2;
   S[2].NullWert = preferences.getInt("Null-2", 3150);
   S[2].VperAmp  = preferences.getFloat("Sens-2", 0.066);
 
   strcpy(S[3].Name, NAME_SENSOR_3);
-  S[3].Type     = 1;
+  S[3].Type     = SENS_TYPE_AMP;
   S[3].IOPort   = 3;
   S[3].NullWert = preferences.getInt("Null-3", 3150);
   S[3].VperAmp  = preferences.getFloat("Sens-3", 0.066);
 
   strcpy(S[4].Name, NAME_SENSOR_4);
-  S[4].Type     = 2;
+  S[4].Type     = SENS_TYPE_VOLT;
   S[4].IOPort   = PIN_VOLTAGE;
   S[4].Vin      = preferences.getInt("Vin", 200);
   S[4].VperAmp  = 1;
@@ -394,8 +394,9 @@ void SetDebugMode(bool Mode) {
   preferences.end();
 }
 void ShowEichen() {
-  if (OldMode != S_EICHEN) TSScreenRefresh = millis(); 
-  if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
+    if (OldMode != Mode) { TSScreenRefresh = millis(); TFT.fillScreen(TFT_BLACK); }
+    
+    if ((TSScreenRefresh - millis() > 1000) or (Mode != OldMode)) {
     char Buf[100] = {}; char BufNr[10] = {};
   
     OldMode = Mode;
@@ -431,7 +432,7 @@ void ShowEichen() {
 
         dtostrf(TempVolt, 0, 2, BufNr);
         sprintf(Buf, "Eichen fertig: [%d] %s (Type: %d): Gemessene Spannung bei Null: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
-        TFT.drawString(Buf, 10, 30+SNr+1*h);
+        TFT.drawString(Buf, 10, 30+(SNr+1)*h);
         AddStatus(Buf);
       }
     }
@@ -467,7 +468,6 @@ void ShowStatus() {
     TFT.drawString("Status...", 10, 10);
     TFT.unloadFont();
 
-    //TFT.loadFont(AA_FONT_MONO);
     TFT.setTextColor(TFT_WHITE, TFT_BLACK);
     
     int h=20;
@@ -478,14 +478,13 @@ void ShowStatus() {
       TFT.drawString(Status[SNr].Msg, 75, 40+(SNr+1)*h);
     }
     TSScreenRefresh = millis();
-    TFT.unloadFont();
     TFT.setTextPadding(0);
   }
 }
 void ShowVoltCalib(float V) {
   char Buf[100] = {}; char BufNr[10] = {}; 
   
-  if (OldMode != S_CAL_VOL) TSScreenRefresh = millis(); 
+  if (OldMode != Mode) { TSScreenRefresh = millis(); TFT.fillScreen(TFT_BLACK); }
   if ((millis() - TSScreenRefresh > 1000) or (Mode != OldMode)) {
     OldMode = Mode;
     ScreenChanged = true;
