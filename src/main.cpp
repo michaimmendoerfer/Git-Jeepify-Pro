@@ -3,13 +3,18 @@
 #include "TAMC_GT911.h"
 #include <Adafruit_ADS1X15.h>
 #include "../../jeepify.h"
-#include <esp_now.h>
-#include <WiFi.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include "NotoSansBold15.h"
 #include "NotoSansBold36.h"
 #include "NotoSansMonoSCB20.h"
+#ifdef ESP32
+  #include <esp_now.h>
+  #include <WiFi.h>
+#elif defined(ESP8266)
+  #include <ESP8266WiFi.h>
+  #include <espnow.h>
+#endif  // ESP32
 
 #define NODE_NAME "Jeep_PRO_V1"
 #define NODE_TYPE BATTERY_SENSOR
@@ -245,33 +250,53 @@ void ReportPeers() {
   }
 }
 void RegisterPeers() {
-  esp_now_peer_info_t peerInfo;
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
-  memset(&peerInfo, 0, sizeof(peerInfo));
+  // Register BROADCAST ESP32
+  #ifdef ESP32
+    esp_now_peer_info_t peerInfo;
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    memset(&peerInfo, 0, sizeof(peerInfo));
+    
+    for (int b=0; b<6; b++) peerInfo.peer_addr[b] = (uint8_t) broadcastAddressAll[b];
+      if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        PrintMAC(peerInfo.peer_addr); Serial.println(": Failed to add peer");
+      }
+      else {
+        Serial.print (" ("); PrintMAC(peerInfo.peer_addr);  Serial.println(") added...");
+      }
 
-  // Register BROADCAST
-  for (int b=0; b<6; b++) peerInfo.peer_addr[b] = (uint8_t) broadcastAddressAll[b];
-    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-      PrintMAC(peerInfo.peer_addr); Serial.println(": Failed to add peer");
+    // Register Peers
+    for (int PNr=0; PNr<MAX_PEERS; PNr++) {
+      if (!isPeerEmpty(PNr)) {
+        for (int b=0; b<6; b++) peerInfo.peer_addr[b] = (uint8_t) P[PNr].BroadcastAddress[b];
+          if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+            PrintMAC(peerInfo.peer_addr); Serial.println(": Failed to add peer");
+          }
+          else {
+            Serial.print("Peer: "); Serial.print(P[PNr].Name); 
+            Serial.print (" ("); PrintMAC(peerInfo.peer_addr); Serial.println(") added...");
+          }
+      }
+    }
+  #elif defined(ESP8266)
+    if (esp_now_add_peer(broadcastAddressAll, ESP_NOW_ROLE_SLAVE, 0, NULL, 0) != 0) {
+      PrintMAC("Broadcast"); Serial.println(": Failed to add peer");
     }
     else {
-      Serial.print (" ("); PrintMAC(peerInfo.peer_addr);  Serial.println(") added...");
+      Serial.print (" ("); PrintMAC(BroadcastAddressAll);  Serial.println(") added...");
     }
-
-  // Register Peers
-  for (int PNr=0; PNr<MAX_PEERS; PNr++) {
-    if (!isPeerEmpty(PNr)) {
-      for (int b=0; b<6; b++) peerInfo.peer_addr[b] = (uint8_t) P[PNr].BroadcastAddress[b];
-        if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-          PrintMAC(peerInfo.peer_addr); Serial.println(": Failed to add peer");
+    for (int PNr=0; PNr<MAX_PEERS; PNr++) {
+      if (!isPeerEmpty(PNr)) {
+        if (esp_now_add_peer(P[PNr].BroadcastAddress, ESP_NOW_ROLE_SLAVE, 0, NULL, 0) != 0) {
+          PrintMAC(P[PNr].Name); Serial.println(": Failed to add peer");
         }
         else {
-          Serial.print("Peer: "); Serial.print(P[PNr].Name); 
-          Serial.print (" ("); PrintMAC(peerInfo.peer_addr); Serial.println(") added...");
+          Serial.print (" ("); PrintMAC(P[PNr].BroadcastAddress);  Serial.println(") added...");
         }
+      }
     }
-  }
+  #endif  // ESP8266
+
 }
 void ClearPeers() {
   preferences.begin("JeepifyPeers", false);
@@ -542,7 +567,12 @@ void ShowVoltCalib(float V) {
     TSScreenRefresh = millis();
   }
 }
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+#ifdef ESP32 // OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+    void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  #elif defined(ESP8266)
+    void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {  
+#endif  // ESP32
+
   char* buff = (char*) incomingData;        //char buffer
   jsondata = String(buff);                  //converting into STRING
   Serial.print("Recieved ");
@@ -629,10 +659,25 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
         return;
   }
 }
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) { 
-  Serial.print("\r\nLast Packet Send Status:\t");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-}
+#ifdef ESP32 // void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)...
+  //ESP32
+  void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) { 
+    Serial.print("\r\nLast Packet Send Status:\t");
+    Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  }
+  #elif defined(ESP8266)
+  //8266
+  void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
+    Serial.print("Last Packet Send Status: ");
+    if (sendStatus == 0){
+      Serial.println("Delivery success");
+    }
+    else{
+      Serial.println("Delivery fail");
+    }
+  }
+#endif  // ESP32
+
 void setup() {
   Serial.begin(74880);
   
@@ -651,8 +696,14 @@ void setup() {
   //ads.begin();
   
   WiFi.mode(WIFI_STA);
-  if (esp_now_init() != ESP_OK) { Serial.println("Error initializing ESP-NOW"); return; }
-
+  
+  #ifdef ESP32
+    if (esp_now_init() != ESP_OK) { Serial.println("Error initializing ESP-NOW"); return; }
+  #elif defined(ESP8266)
+    if (esp_now_init() != 0)      { Serial.println("Error initializing ESP-NOW"); return; }
+    esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+  #endif  // ESP32
+  
   esp_now_register_send_cb(OnDataSent);
   esp_now_register_recv_cb(OnDataRecv);    
 
