@@ -567,12 +567,12 @@ void ShowVoltCalib(float V) {
     TSScreenRefresh = millis();
   }
 }
-#ifdef ESP32 // OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+#ifdef ESP32 
     void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   #elif defined(ESP8266)
     void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {  
 #endif  // ESP32
-
+//void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   char* buff = (char*) incomingData;        //char buffer
   jsondata = String(buff);                  //converting into STRING
   Serial.print("Recieved ");
