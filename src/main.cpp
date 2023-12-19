@@ -66,8 +66,6 @@ uint32_t TSTouch = 0;
 Preferences preferences;
 
 TFT_eSPI TFT               = TFT_eSPI();
-TFT_eSprite TFTBuffer      = TFT_eSprite(&TFT);
-TFT_eSprite TFTGaugeSwitch = TFT_eSprite(&TFT);
 
 float  ReadAmp (int A);
 float  ReadVolt(int V);
@@ -296,15 +294,20 @@ void ShowPairingScreen() {
     OldMode = Mode;
     ScreenChanged = true;
 
-    TFTBuffer.loadFont(AA_FONT_LARGE);
-    
-    TFTBuffer.setTextColor(TFT_WHITE, TFT_BLACK);
-    TFTBuffer.setTextDatum(TC_DATUM);
-
     TFT.fillScreen(TFT_BLACK);
+    
+    TFT.loadFont(AA_FONT_LARGE);
+    
+    TFT.setTextColor(TFT_RUBICON, TFT_BLACK);
+    TFT.setTextPadding(469);
+    TFT.setTextDatum(TL_DATUM);
 
-    TFT.drawString("Waiting for Host...", 10, 30);
+    TFT.drawString("Waiting for Host...", 10, 10);
+    TFT.unloadFont();
 
+    TFT.loadFont(AA_FONT_SMALL);
+    TFT.setTextColor(TFT_WHITE, TFT_BLACK);
+    
     int h=20;
     for (int PNr=0; PNr<MAX_PEERS; PNr++) {
       snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -314,6 +317,7 @@ void ShowPairingScreen() {
       
       TFT.drawString(Buf, 10, 30+(PNr+1)*h);
     }
+    TFT.unloadFont();
     TSScreenRefresh = millis();
   }
 }
@@ -346,7 +350,7 @@ void SendMessage () {
   serializeJson(doc, jsondata);  
   //senden an alle Monitore
   for (int PNr=0; PNr<MAX_PEERS; PNr++) {
-    if (P[PNr].Type > 9) {
+    if (P[PNr].Type >= MONITOR_ROUND) {
       Serial.print("Sending to: "); Serial.println(P[PNr].Name); 
       Serial.print(" ("); PrintMAC(P[PNr].BroadcastAddress); Serial.println(")");
       esp_now_send(P[PNr].BroadcastAddress, (uint8_t *) jsondata.c_str(), 200);  //Sending "jsondata"  
@@ -491,9 +495,16 @@ void ShowVoltCalib(float V) {
     ScreenChanged = true;
     
     TFT.fillScreen(TFT_BLACK);
-  
-    TFT.drawString("Volt-Messung kalibrieren...", 10, 30);
+    
+    TFT.loadFont(AA_FONT_LARGE);
+    
+    TFT.setTextColor(TFT_RUBICON, TFT_BLACK);
+    TFT.setTextPadding(469);
+    TFT.setTextDatum(TL_DATUM);
 
+    TFT.drawString("Volt-Messung kalibrieren...", 10, 10);
+    TFT.unloadFont();
+    
     if (Debug) Serial.println("Volt eichen...");
     preferences.begin("JeepifyInit", false);
     
@@ -517,7 +528,7 @@ void ShowVoltCalib(float V) {
         dtostrf(TempRead/S[SNr].Vin, 0, 2, BufNr);
         sprintf(Buf, "[%d] %s (Type: %d): Spannung ist jetzt: %sV", SNr, S[SNr].Name, S[SNr].Type, BufNr);
         
-        TFT.drawString(Buf, 10, 30+SNr+1*h);
+        TFT.drawString(Buf, 10, 50+(SNr+1)*h);
         AddStatus(Buf);
 
         break;
@@ -633,7 +644,6 @@ void setup() {
   //ClearPeers();
   TFT.init();
   TFT.setRotation(3);
-  //TFT.setSwapBytes(true);
   TFT.fillScreen(TFT_BLACK);
 
   //Wire.begin(D5, D6);
@@ -646,36 +656,36 @@ void setup() {
   esp_now_register_send_cb(OnDataSent);
   esp_now_register_recv_cb(OnDataRecv);    
 
-  Serial.println("InitModule...");
-  InitModule();
-  Debug = true;
-  //ClearPeers();
-  Serial.println("GetPeers...");
-  GetPeers();
-  Serial.println("ReportPeers...");
-  ReportPeers();
-  Serial.println("RegisterPeers...");
-  RegisterPeers();
-  Serial.println("RegisterPeers fertig...");
-
+  InitModule();     AddStatus("Init Module");
+  GetPeers();       AddStatus("Get Peers");
+  ReportPeers();    
+  RegisterPeers();  AddStatus("Init fertig");
+  
   if (PeerCount == 0) { AddStatus("Pairing beginnt"); ReadyToPair = true; TSPair = millis(); }
   
   TSScreenRefresh = millis();
-
-  AddStatus("Init fertig");
 
   //free Pins
 }
 void loop() {
   int G;
   if  ((millis() - TSTouch) > TOUCH_INTERVAL) {
-    G = TouchRead();
-    TSTouch = millis();
-    if (G == LONG_PRESS) {ClearPeers(); ESP.restart();}  
-    if (G == CLICK) {
-      if (Mode == S_STATUS) Mode = S_PAIRING;
-      else if (Mode == S_PAIRING) Mode = S_STATUS;
-    } 
+    G = TouchRead(); TSTouch = millis();
+
+    switch (Mode) {
+      case S_PAIRING:
+        switch (G) {
+          CLICK:      Mode = S_STATUS; break;
+        }
+        break;
+      case S_STATUS:
+        switch (G) {
+          CLICK:      Mode = S_PAIRING; break;
+          LONG_PRESS: ClearPeers(); ESP.restart(); break;
+        }
+        break;
+    }
+   
   }
   if  ((millis() - TSSend ) > MSG_INTERVAL  ) {
     TSSend = millis();
@@ -693,7 +703,6 @@ void loop() {
     case S_PAIRING: ShowPairingScreen();
     case S_STATUS:  ShowStatus();
   }
-  //PushTFT();
 }
 float ReadAmp (int A) {
   /*float TempVal = ads.readADC_SingleEnded(S[A].IOPort);
