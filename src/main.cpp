@@ -270,7 +270,7 @@ void RegisterPeers() {
   // Register BROADCAST ESP32
   #ifdef ESP32
     esp_now_peer_info_t peerInfo;
-    peerInfo.channel = 0;
+    peerInfo.channel = 1;
     peerInfo.encrypt = false;
     memset(&peerInfo, 0, sizeof(peerInfo));
     
@@ -296,7 +296,7 @@ void RegisterPeers() {
       }
     }
   #elif defined(ESP8266)
-    if (esp_now_add_peer(broadcastAddressAll, ESP_NOW_ROLE_SLAVE, 0, NULL, 0) != 0) {
+    if (esp_now_add_peer(broadcastAddressAll, ESP_NOW_ROLE_SLAVE, 1, NULL, 0) != 0) {
       PrintMAC("Broadcast"); Serial.println(": Failed to add peer");
     }
     else {
@@ -304,7 +304,7 @@ void RegisterPeers() {
     }
     for (int PNr=0; PNr<MAX_PEERS; PNr++) {
       if (!isPeerEmpty(PNr)) {
-        if (esp_now_add_peer(P[PNr].BroadcastAddress, ESP_NOW_ROLE_SLAVE, 0, NULL, 0) != 0) {
+        if (esp_now_add_peer(P[PNr].BroadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0) != 0) {
           PrintMAC(P[PNr].Name); Serial.println(": Failed to add peer");
         }
         else {
