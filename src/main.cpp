@@ -1,3 +1,5 @@
+#define MODULE_4AMP_1VOLT
+
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include "TAMC_GT911.h"
@@ -8,23 +10,38 @@
 #include "NotoSansBold15.h"
 #include "NotoSansBold36.h"
 #include "NotoSansMonoSCB20.h"
-#ifdef ESP32
-  #include <esp_now.h>
-  #include <WiFi.h>
-#elif defined(ESP8266)
-  #include <ESP8266WiFi.h>
-  #include <espnow.h>
-#endif  // ESP32
+#include <esp_now.h>
+#include <WiFi.h>
 
 #define NODE_NAME "Jeep_PRO_V1"
 #define NODE_TYPE BATTERY_SENSOR
 #define VERSION   "V 0.71"
 
-#define NAME_SENSOR_0 "Bat0"
-#define NAME_SENSOR_1 "Bat1"
-#define NAME_SENSOR_2 "Bat2"
-#define NAME_SENSOR_3 "Bat3"
-#define NAME_SENSOR_4 "Bat4"
+#ifdef MODULE_4AMP_1VOLT
+  #define NAME_SENSOR_0 "Bat0"
+  #define TYPE_SENSOR_0  SENS_TYPE_AMP
+  #define NULL_SENSOR_0  3134
+  #define SENS_SENSOR_0  0.066
+
+  #define NAME_SENSOR_1 "Bat1"
+  #define TYPE_SENSOR_1  SENS_TYPE_AMP
+  #define NULL_SENSOR_1  3134
+  #define SENS_SENSOR_1  0.066
+  
+  #define NAME_SENSOR_2 "Bat2"
+  #define TYPE_SENSOR_2  SENS_TYPE_AMP
+  #define NULL_SENSOR_2  3150
+  #define SENS_SENSOR_2  0.066
+
+  #define NAME_SENSOR_3 "Bat3"
+  #define TYPE_SENSOR_3  SENS_TYPE_AMP
+  #define NULL_SENSOR_3  3150
+  #define SENS_SENSOR_3  0.066
+
+  #define NAME_SENSOR_4  "Volt"
+  #define TYPE_SENSOR_4  SENS_TYPE_VOLT
+  #define VIN_SENSOR_4   200
+#endif
 
 #define PIN_VOLTAGE    35
 
@@ -111,33 +128,33 @@ void InitModule() {
   SleepMode = preferences.getBool("SleepMode", false);
   
   strcpy(S[0].Name, NAME_SENSOR_0);
-  S[0].Type     = SENS_TYPE_AMP;
+  S[0].Type     = TYPE_SENSOR_0;
   S[0].IOPort   = 0;
-  S[0].NullWert = preferences.getInt("Null-0", 3134);
-  S[0].VperAmp  = preferences.getFloat("Sens-0", 0.066);
+  S[0].NullWert = preferences.getInt("Null-0", NULL_SENSOR_0);
+  S[0].VperAmp  = preferences.getFloat("Sens-0", SENS_SENSOR_0);
 
   strcpy(S[1].Name, NAME_SENSOR_1);
-  S[1].Type     = SENS_TYPE_AMP;
+  S[1].Type     = TYPE_SENSOR_1;
   S[1].IOPort   = 1;
-  S[1].NullWert = preferences.getInt("Null-1", 3134);
-  S[1].VperAmp  = preferences.getFloat("Sens-1", 0.066);
+  S[1].NullWert = preferences.getInt("Null-1", TYPE_SENSOR_1);
+  S[1].VperAmp  = preferences.getFloat("Sens-1", NULL_SENSOR_1);
 
   strcpy(S[2].Name, NAME_SENSOR_2);
-  S[2].Type     = SENS_TYPE_AMP;
+  S[2].Type     = TYPE_SENSOR_2;
   S[2].IOPort   = 2;
-  S[2].NullWert = preferences.getInt("Null-2", 3150);
-  S[2].VperAmp  = preferences.getFloat("Sens-2", 0.066);
+  S[2].NullWert = preferences.getInt("Null-2", NULL_SENSOR_2);
+  S[2].VperAmp  = preferences.getFloat("Sens-2", SENS_SENSOR_2);
 
   strcpy(S[3].Name, NAME_SENSOR_3);
-  S[3].Type     = SENS_TYPE_AMP;
+  S[3].Type     = TYPE_SENSOR_3;
   S[3].IOPort   = 3;
-  S[3].NullWert = preferences.getInt("Null-3", 3150);
-  S[3].VperAmp  = preferences.getFloat("Sens-3", 0.066);
+  S[3].NullWert = preferences.getInt("Null-3", NULL_SENSOR_3);
+  S[3].VperAmp  = preferences.getFloat("Sens-3", SENS_SENSOR_3);
 
   strcpy(S[4].Name, NAME_SENSOR_4);
-  S[4].Type     = SENS_TYPE_VOLT;
+  S[4].Type     = TYPE_SENSOR_4;
   S[4].IOPort   = PIN_VOLTAGE;
-  S[4].Vin      = preferences.getInt("Vin", 200);
+  S[4].Vin      = preferences.getInt("Vin", VIN_SENSOR_4);
   S[4].VperAmp  = 1;
 
   preferences.end();
@@ -432,10 +449,10 @@ void ShowEichen() {
     OldMode = Mode;
     ScreenChanged = true;
     
-    TFTBuffer.loadFont(AA_FONT_LARGE);
+    TFT.loadFont(AA_FONT_LARGE);
     
-    TFTBuffer.setTextColor(TFT_RUBICON, TFT_BLACK);
-    TFTBuffer.setTextDatum(TC_DATUM);
+    TFT.setTextColor(TFT_RUBICON, TFT_BLACK);
+    TFT.setTextDatum(TC_DATUM);
 
     TFT.fillScreen(TFT_BLACK);
   
@@ -583,8 +600,6 @@ void ShowVoltCalib(float V) {
   if (!error) {
     if (ReadyToPair) {
       if (doc["Pairing"] == "you are paired") { 
-        //for (int b=0; b < 6; b++ ) TempBroadcast[b] = (uint8_t) mac[b];
-        
         bool exists = esp_now_is_peer_exist(mac);
         if (exists) { 
           PrintMAC(mac); Serial.println(" already exists...");
@@ -726,13 +741,13 @@ void loop() {
     switch (Mode) {
       case S_PAIRING:
         switch (G) {
-          CLICK:      Mode = S_STATUS; break;
+          case CLICK:      Mode = S_STATUS; break;
         }
         break;
       case S_STATUS:
         switch (G) {
-          CLICK:      Mode = S_PAIRING; break;
-          LONG_PRESS: ClearPeers(); ESP.restart(); break;
+          case CLICK:      Mode = S_PAIRING; break;
+          case LONG_PRESS: ClearPeers(); ESP.restart(); break;
         }
         break;
     }
