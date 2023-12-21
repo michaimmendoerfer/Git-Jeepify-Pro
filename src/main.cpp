@@ -618,7 +618,6 @@ void ShowVoltCalib(float V) {
               
               PairingSuccess = true; 
               SavePeers();
-              //ShowAllPreferences();
               RegisterPeers();
               
               if (Debug) {
@@ -701,7 +700,6 @@ void setup() {
 
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
-  //ClearPeers();
   TFT.init();
   TFT.setRotation(3);
   TFT.fillScreen(TFT_BLACK);
