@@ -1,4 +1,7 @@
 #define MODULE_4AMP_1VOLT
+#define MODULE_HAS_TOUCH
+#define MODULE_HAS_TFT
+#define MODULE_HAS_ADS
 
 #include <Arduino.h>
 #include <TFT_eSPI.h>
@@ -48,7 +51,10 @@
 #define D5 12
 #define D6 13
 
-TAMC_GT911 tp = TAMC_GT911(TOUCH_SDA, TOUCH_SCL, TOUCH_INT, TOUCH_RST, TOUCH_WIDTH, TOUCH_HEIGHT);
+#ifdef MODULE_HAS_TOUCH
+  TAMC_GT911 tp = TAMC_GT911(TOUCH_SDA, TOUCH_SCL, TOUCH_INT, TOUCH_RST, TOUCH_WIDTH, TOUCH_HEIGHT);
+#endif
+
 Adafruit_ADS1115 ads;
 
 struct_Sensor S[NODE_TYPE];
@@ -231,6 +237,7 @@ void GetPeers() {
       preferences.getBytes(Buf, P[Pi].BroadcastAddress, 6);
       
       P[Pi].TSLastSeen = millis();
+      P[Pi].Id = Pi;
 
       if (Debug) {
         Serial.print("GetPeers: P["); Serial.print(Pi); Serial.print("]: Type="); Serial.print(P[Pi].Type); 
@@ -242,28 +249,38 @@ void GetPeers() {
   preferences.end();
 }
 void ReportPeers() {
-  TFT.fillScreen(TFT_BLACK);
-  TFT.setCursor(0, 0, 2);
-  TFT.setTextColor(TFT_WHITE,TFT_BLACK);  TFT.setTextSize(1);
-  
-  TFT.println("Peer-Report:");
-  TFT.println();
-
-  for (int PNr=0; PNr<MAX_PEERS; PNr++) {
-    if (Debug) {
-      Serial.println(P[PNr].Name);
-      Serial.println(P[PNr].Type);
-      Serial.print("MAC: "); PrintMAC(P[PNr].BroadcastAddress);
-      Serial.println();
-    }
+  if (OldMode != Mode) TSScreenRefresh = millis();
+  if ((millis() - TSScreenRefresh > 1000) or (Mode != OldMode)) {
     
-    char macStr[18];
-    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-           P[PNr].BroadcastAddress[0], P[PNr].BroadcastAddress[1], P[PNr].BroadcastAddress[2], 
-           P[PNr].BroadcastAddress[3], P[PNr].BroadcastAddress[4], P[PNr].BroadcastAddress[5]);
+    OldMode = Mode;
+    ScreenChanged = true;
 
-    TFT.print("["); TFT.print(PNr); TFT.print("]-"); TFT.print(P[PNr].Name); TFT.print(": - Type:"); TFT.print(P[PNr].Type);
-    TFT.print(" - MAC:"); TFT.println(macStr);
+    TFT.fillScreen(TFT_BLACK);
+    
+    TFT.loadFont(AA_FONT_LARGE);
+    
+    TFT.setTextColor(TFT_RUBICON, TFT_BLACK);
+    TFT.setTextPadding(469);
+    TFT.setTextDatum(TL_DATUM);
+
+    char Buf[200];
+
+    TFT.drawString("Peer-Report:", 10, 10);
+    TFT.unloadFont();
+
+    TFT.loadFont(AA_FONT_SMALL);
+    TFT.setTextColor(TFT_WHITE, TFT_BLACK);
+    
+    int h=20;
+    for (int PNr=0; PNr<MAX_PEERS; PNr++) {
+      sprintf(Buf, "ID:%d - %s (Type %d) - %02x:%02x:%02x:%02x:%02x:%02x", P[PNr].Id, P[PNr].Name, P[PNr].Type, 
+          P[PNr].BroadcastAddress[0], P[PNr].BroadcastAddress[1], P[PNr].BroadcastAddress[2], 
+          P[PNr].BroadcastAddress[3], P[PNr].BroadcastAddress[4], P[PNr].BroadcastAddress[5]);
+      if (Debug) Serial.println(Buf);  
+      TFT.drawString(Buf, 10, 30+(PNr+1)*h);
+    }
+    TFT.unloadFont();
+    TSScreenRefresh = millis();
   }
 }
 void RegisterPeers() {
